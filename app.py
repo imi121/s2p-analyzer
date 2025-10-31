@@ -81,6 +81,176 @@ footer{visibility:hidden;}
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+:root {
+  --bg-dark: #0d1117;
+  --bg-panel: rgba(22, 27, 34, 0.8);
+  --glass: blur(20px) saturate(1.4);
+  --primary: #6366f1;
+  --primary-light: #818cf8;
+  --cyan: #06b6d4;
+  --text-main: #e5e7eb;
+  --text-muted: #9ca3af;
+  --accent: #4f46e5;
+  --border: rgba(255,255,255,0.08);
+  --shadow: 0 12px 40px rgba(0,0,0,0.45);
+}
+
+/* Page globale */
+html, body, [class*="css"]  {
+  background: radial-gradient(circle at 30% 30%, rgba(79,70,229,0.15) 0%, transparent 70%), 
+              linear-gradient(160deg, #0d1117 0%, #111827 80%);
+  color: var(--text-main);
+  font-family: 'Inter', sans-serif;
+}
+
+/* Conteneur principal */
+.main .block-container {
+  background: transparent;
+  max-width: 1200px;
+  padding-top: 1rem;
+}
+
+/* Hero section */
+.hero {
+  background: linear-gradient(135deg, rgba(63,63,214,0.7) 0%, rgba(25,28,56,0.9) 100%);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 28px 32px;
+  box-shadow: var(--shadow);
+  color: var(--text-main);
+}
+.hero h1 {
+  font-size: 1.8rem;
+  font-weight: 800;
+  letter-spacing: .3px;
+  color: #fff;
+}
+.hero p {
+  opacity: 0.9;
+  font-size: 1rem;
+}
+.badge {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: var(--text-main);
+}
+
+/* KPI Cards */
+.kpi-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  backdrop-filter: var(--glass);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  padding: 20px 22px;
+  transition: all 0.25s ease;
+}
+.kpi-card:hover {
+  border-color: var(--primary-light);
+  transform: translateY(-2px);
+}
+.kpi-title {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 6px;
+}
+.kpi-value {
+  color: #f3f4f6;
+  font-size: 2.2rem;
+  font-weight: 800;
+}
+.kpi-unit {
+  color: var(--cyan);
+  font-size: 1.2rem;
+  margin-left: .3rem;
+}
+.kpi-sub {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-top: 5px;
+}
+
+/* Sliders */
+.stSlider > div[data-baseweb="slider"] {
+  background: rgba(255,255,255,0.08);
+  border-radius: 10px;
+}
+.stSlider > div[data-baseweb="slider"] div[role="slider"] {
+  background-color: var(--primary);
+  box-shadow: 0 0 0 6px rgba(79,70,229,0.35);
+}
+
+/* Boutons */
+.stButton > button, .stDownloadButton > button {
+  background: linear-gradient(135deg, var(--accent), var(--cyan));
+  color: white !important;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  box-shadow: 0 6px 25px rgba(79,70,229,0.4);
+  transition: all 0.3s ease;
+}
+.stButton > button:hover, .stDownloadButton > button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(79,70,229,0.55);
+}
+
+/* Tabs */
+[data-baseweb="tab-list"] {
+  background: var(--bg-panel);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+[data-baseweb="tab"] {
+  color: var(--text-muted);
+}
+[data-baseweb="tab"][aria-selected="true"] {
+  background: linear-gradient(135deg, var(--primary), var(--cyan));
+  color: white !important;
+}
+
+/* Table */
+[data-testid="stDataFrame"] {
+  background: var(--bg-panel);
+  color: var(--text-main);
+  border-radius: 12px;
+}
+
+/* Separator */
+.sep {
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  margin: 25px 0;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+  background: linear-gradient(160deg, #0f172a 0%, #1e293b 100%);
+  border-right: 1px solid rgba(255,255,255,0.05);
+  color: var(--text-main);
+}
+section[data-testid="stSidebar"] h1, 
+section[data-testid="stSidebar"] h2, 
+section[data-testid="stSidebar"] label {
+  color: var(--text-main);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(var(--primary), var(--cyan));
+  border-radius: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # ================== ICONES (SVG inline) ==================
 def svg_icon(name:str)->str:
     # Icônes minimalistes (Lucide-like) en paths
