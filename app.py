@@ -1,4 +1,4 @@
-# app.py — Analyse .s2p : Cp / tanδ / ESR / ESL (UI soignée + unités convertibles + métriques @ f0)
+# app.py — Analyse .s2p : Cp / tanδ / ESR / ESL (fix "str' object is not callable")
 import re, math, cmath, io
 import numpy as np
 import pandas as pd
@@ -11,7 +11,6 @@ from scipy.signal import savgol_filter
 st.set_page_config(page_title="Analyse .s2p — Cp / tanδ / ESR / ESL", layout="wide")
 st.markdown("""
 <style>
-/* Nettoyage et typographie */
 .main .block-container {padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1200px;}
 h1, h2, h3 { font-weight: 700; letter-spacing: .2px; }
 .kpi-card {background: #ffffff; border: 1px solid #ececec; border-radius: 14px; padding: 14px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.04);}
@@ -19,7 +18,6 @@ h1, h2, h3 { font-weight: 700; letter-spacing: .2px; }
 .kpi-value {font-size: 1.6rem; font-weight: 700; color: #111;}
 .kpi-row {gap: 12px;}
 hr {border: none; border-top: 1px solid #eee; margin: 18px 0;}
-/* Cache le footer streamlit pour un rendu clean */
 footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
@@ -29,9 +27,11 @@ SI_FREQ = {"Hz":1.0, "kHz":1e3, "MHz":1e6, "GHz":1e9}
 SI_CAP  = {"F":1.0, "mF":1e-3, "µF":1e-6, "nF":1e-9, "pF":1e-12, "fF":1e-15}
 SI_IND  = {"H":1.0, "mH":1e-3, "µH":1e-6, "nH":1e-9, "pH":1e-12}
 SI_RES  = {"Ω":1.0, "mΩ":1e-3, "kΩ":1e3}
-def to_unit(x, factor): 
+
+def to_unit(x, factor):
     return None if (x is None or not np.isfinite(x)) else float(x)/factor
-def fmt(x, digits=6):
+
+def fmt_num(x, digits=6):
     return "N/A" if (x is None or not np.isfinite(x)) else f"{x:.{digits}g}"
 
 # ---------- Parsing ----------
@@ -41,7 +41,8 @@ def parse_touchstone_s2p(file_like):
     text = file_like.read().decode("utf-8", errors="ignore")
     for raw in text.splitlines():
         line = raw.strip()
-        if not line or line.startswith("!"): continue
+        if not line or line.startswith("!"): 
+            continue
         if line.startswith("#"):
             t = line[1:].strip().split(); T = [x.upper() for x in t]
             for u in ["HZ","KHZ","MHZ","GHZ"]:
@@ -55,21 +56,29 @@ def parse_touchstone_s2p(file_like):
                     except: pass
             continue
         parts = re.split(r"\s+", line)
-        if len(parts) < 9: continue
-        try: fval = float(parts[0])
-        except: continue
+        if len(parts) < 9: 
+            continue
+        try:
+            fval = float(parts[0])
+        except:
+            continue
         mult = {"Hz":1.0, "KHz":1e3, "kHz":1e3, "MHz":1e6, "GHz":1e9}
         f_Hz = fval*mult.get(freq_unit,1.0)
         a = list(map(float, parts[1:9]))
-        def cplx(x,y,fmt):
-            if fmt=="RI": return complex(x,y)
-            if fmt=="MA": return x*cmath.exp(1j*math.radians(y))
-            if fmt=="DB": return (10**(x/20.0))*cmath.exp(1j*math.radians(y))
+
+        def cplx(x,y,fmtname):
+            if fmtname=="RI": return complex(x,y)
+            if fmtname=="MA": return x*cmath.exp(1j*math.radians(y))
+            if fmtname=="DB": return (10**(x/20.0))*cmath.exp(1j*math.radians(y))
             return complex(x,y)
+
         S11=cplx(a[0],a[1],data_format); S21=cplx(a[2],a[3],data_format)
         S12=cplx(a[4],a[5],data_format); S22=cplx(a[6],a[7],data_format)
         freqs.append(f_Hz); S11_list.append(S11); S21_list.append(S21); S12_list.append(S12); S22_list.append(S22)
-    if not freqs: raise ValueError("Aucune donnée valide dans le .s2p")
+
+    if not freqs:
+        raise ValueError("Aucune donnée valide dans le .s2p")
+
     return (np.asarray(freqs,float),
             np.asarray(S11_list,complex),
             np.asarray(S21_list,complex),
@@ -78,7 +87,9 @@ def parse_touchstone_s2p(file_like):
             float(z0), data_format, freq_unit)
 
 # ---------- Calculs ----------
-def s11_to_zin(S11, Z0): return Z0*(1+S11)/(1-S11)
+def s11_to_zin(S11, Z0): 
+    return Z0*(1+S11)/(1-S11)
+
 def compute_params_from_s11(freqs, S11, Z0):
     w = 2*np.pi*freqs
     Zin = s11_to_zin(S11, Z0)
@@ -91,26 +102,41 @@ def compute_params_from_s11(freqs, S11, Z0):
     with np.errstate(divide='ignore', invalid='ignore'):
         Cs = np.where(Xs<0, -1.0/(w*Xs), np.nan)
         Ls = np.where(Xs>0,  Xs/w, np.nan)
-    df = pd.DataFrame({"freq_Hz":freqs,"Cp_F":Cp,"tanD":tanD,"ESR_Ohm":Rs,"ESL_H":Ls,"Cs_F":Cs,"Ls_H":Ls})
+
+    df = pd.DataFrame({
+        "freq_Hz":freqs,
+        "Cp_F":Cp,
+        "tanD":tanD,
+        "ESR_Ohm":Rs,
+        "ESL_H":Ls,
+        "Cs_F":Cs
+    })
     return df, Zin, Yin
 
 def band_decimate(df, fmin, fmax, decim):
     d = df[(df["freq_Hz"]>=fmin) & (df["freq_Hz"]<=fmax)].copy()
-    if decim>1: d = d.iloc[::decim,:].reset_index(drop=True)
+    if decim>1: 
+        d = d.iloc[::decim,:].reset_index(drop=True)
     return d
 
 def savgol_opt(y, win, poly):
-    if not win or not poly: return y
-    win = int(win); 
-    if win%2==0: win += 1
-    if win<3 or win>len(y): return y
-    try: return savgol_filter(y, win, int(poly))
-    except: return y
+    if not win or not poly: 
+        return y
+    win = int(win)
+    if win%2==0: 
+        win += 1
+    if win<3 or win>len(y): 
+        return y
+    try: 
+        return savgol_filter(y, win, int(poly))
+    except: 
+        return y
 
 def interp_at(f, y, f0):
     f = np.asarray(f,float); y = np.asarray(y,float)
     mask = np.isfinite(f) & np.isfinite(y)
-    if not np.any(mask): return np.nan
+    if not np.any(mask): 
+        return np.nan
     return float(np.interp(f0, f[mask], y[mask]))
 
 # ---------- UI : Input ----------
@@ -121,7 +147,7 @@ with st.sidebar:
     st.header("Options d'analyse")
     c1,c2 = st.columns(2)
     f0_val = c1.number_input("Fréquence f₀", value=1.0, min_value=0.0, format="%.6f")
-    f0_unit = c2.selectbox("Unité f₀", list(SI_FREQ.keys()), index=3)  # Hz/kHz/MHz/GHz
+    f0_unit = c2.selectbox("Unité f₀", list(SI_FREQ.keys()), index=3)  # GHz par défaut
 
     s1,s2 = st.columns(2)
     fmin_val = s1.number_input("fmin", value=1.0, min_value=0.0, format="%.6f")
@@ -140,23 +166,23 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("Unités d'affichage (KPIs)")
-    # sélecteurs d’unités pour chaque métrique
-    uC  = st.selectbox("Unité Cp", list(SI_CAP.keys()), index=4)     # pF par défaut
+    uC  = st.selectbox("Unité Cp", list(SI_CAP.keys()), index=4)     # pF
     uL  = st.selectbox("Unité ESL", list(SI_IND.keys()), index=3)    # nH
-    uR  = st.selectbox("Unité ESR", list(SI_RES.keys()), index=0)    # ohm
+    uR  = st.selectbox("Unité ESR", list(SI_RES.keys()), index=0)    # Ω
     uF0 = st.selectbox("Unité fréquence", list(SI_FREQ.keys()), index=3)  # GHz
 
 # valeurs en SI
-f0  = f0_val*SI_FREQ[f0_unit]
-fmin= fmin_val*SI_FREQ[fmin_unit]
-fmax= fmax_val*SI_FREQ[fmax_unit]
+f0   = f0_val*SI_FREQ[f0_unit]
+fmin = fmin_val*SI_FREQ[fmin_unit]
+fmax = fmax_val*SI_FREQ[fmax_unit]
 
 # ---------- Main ----------
 if uploaded:
     try:
-        freqs, S11, S21, S12, S22, Z0, fmt, funit = parse_touchstone_s2p(uploaded)
+        freqs, S11, S21, S12, S22, Z0, data_fmt, funit = parse_touchstone_s2p(uploaded)
         df, Zin, Yin = compute_params_from_s11(freqs, S11, Z0)
-        meta = f"Z0={Z0:.2f} Ω | Format={fmt} | Unité entête={funit} | Points={len(df)}"
+
+        meta = f"Z0={Z0:.2f} Ω | Format={data_fmt} | Unité entête={funit} | Points={len(df)}"
         st.success(meta)
 
         # bande + décimation + lissage
@@ -166,39 +192,43 @@ if uploaded:
                 df[col] = savgol_opt(df[col].values.astype(float), sg_win, sg_poly)
 
         # -------- KPIs @ f0 --------
-        Cp_f0   = interp_at(df["freq_Hz"], df["Cp_F"], f0)
+        Cp_f0   = interp_at(df["freq_Hz"], df["Cp_F"],    f0)
         ESR_f0  = interp_at(df["freq_Hz"], df["ESR_Ohm"], f0)
-        ESL_f0  = interp_at(df["freq_Hz"], df["ESL_H"], f0)
-        tanD_f0 = interp_at(df["freq_Hz"], df["tanD"], f0)
+        ESL_f0  = interp_at(df["freq_Hz"], df["ESL_H"],   f0)
+        tanD_f0 = interp_at(df["freq_Hz"], df["tanD"],    f0)
         Q_f0    = (1.0/tanD_f0) if np.isfinite(tanD_f0) and tanD_f0>0 else np.nan
 
-        # Alerte tanδ si hors régime capacitif "sain"
+        # Alerte tanδ
         if np.isfinite(tanD_f0) and tanD_f0>1:
             st.warning("tanδ@f₀ > 1 → Q très faible. Vérifie le régime (inductif/au voisinage de SRF) ou le de-embedding.")
 
+        # Info si f0 est hors bande filtrée
+        if (f0<df["freq_Hz"].min()) or (f0>df["freq_Hz"].max()):
+            st.info("f₀ est hors de la bande affichée → interpolation impossible dans cette bande.")
+
         # Conversion unités pour affichage
-        Cp_disp  = to_unit(Cp_f0, SI_CAP[uC])
+        Cp_disp  = to_unit(Cp_f0,  SI_CAP[uC])
         ESL_disp = to_unit(ESL_f0, SI_IND[uL])
         ESR_disp = to_unit(ESR_f0, SI_RES[uR])
-        f0_disp  = to_unit(f0, SI_FREQ[uF0])
+        f0_disp  = to_unit(f0,     SI_FREQ[uF0])
 
         # -------- Cartes KPIs --------
         st.write(" ")
         k1,k2,k3 = st.columns(3)
         with k1:
             st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-title">Fréquence f₀ ({uF0})</div><div class="kpi-value">{fmt(f0_disp)}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="kpi-title">ESR @ f₀ ('+uR+')</div><div class="kpi-value">'+fmt(ESR_disp)+'</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-title">Fréquence f₀ ({uF0})</div><div class="kpi-value">{fmt_num(f0_disp)}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-title">ESR @ f₀ ({uR})</div><div class="kpi-value">{fmt_num(ESR_disp)}</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
         with k2:
             st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-title">Cp @ f₀ ({uC})</div><div class="kpi-value">{fmt(Cp_disp)}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="kpi-title">tanδ @ f₀ (—)</div><div class="kpi-value">'+fmt(tanD_f0)+'</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-title">Cp @ f₀ ({uC})</div><div class="kpi-value">{fmt_num(Cp_disp)}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-title">tanδ @ f₀ (—)</div><div class="kpi-value">{fmt_num(tanD_f0)}</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
         with k3:
             st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-title">ESL @ f₀ ({uL})</div><div class="kpi-value">{fmt(ESL_disp)}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="kpi-title">Q @ f₀ (—)</div><div class="kpi-value">'+fmt(Q_f0)+'</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-title">ESL @ f₀ ({uL})</div><div class="kpi-value">{fmt_num(ESL_disp)}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-title">Q @ f₀ (—)</div><div class="kpi-value">{fmt_num(Q_f0)}</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("—")
@@ -249,12 +279,12 @@ if uploaded:
                     "",
                     meta,
                     "",
-                    f"f₀ = {fmt(f0_disp)} {uF0}",
-                    f"ESR(f₀) = {fmt(ESR_disp)} {uR}",
-                    f"Cp(f₀) = {fmt(Cp_disp)} {uC}",
-                    f"ESL(f₀) = {fmt(ESL_disp)} {uL}",
-                    f"tanδ(f₀) = {fmt(tanD_f0)} (—)",
-                    f"Q(f₀) = {fmt(Q_f0)} (—)",
+                    f"f₀ = {fmt_num(f0_disp)} {uF0}",
+                    f"ESR(f₀) = {fmt_num(ESR_disp)} {uR}",
+                    f"Cp(f₀) = {fmt_num(Cp_disp)} {uC}",
+                    f"ESL(f₀) = {fmt_num(ESL_disp)} {uL}",
+                    f"tanδ(f₀) = {fmt_num(tanD_f0)} (—)",
+                    f"Q(f₀) = {fmt_num(Q_f0)} (—)",
                 ]
                 ax.text(0.05, 0.95, "\n".join(lines), va="top", fontsize=11)
                 pdf.savefig(fig); plt.close(fig)
@@ -264,7 +294,8 @@ if uploaded:
                 pdf.savefig(fig_semilogx(f, df["tanD"].values, "Fréquence (Hz)", "tanδ (—)", "Facteur de pertes tanδ")); plt.close()
                 pdf.savefig(fig_loglog(f, np.clip(df["ESR_Ohm"].values.astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)")); plt.close()
                 pdf.savefig(fig_loglog(f, np.abs(df["ESL_H"].values.astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)")); plt.close()
-            buf.seek(0); return buf
+            buf.seek(0); 
+            return buf
 
         pdf_buf = make_pdf(df, meta)
         st.download_button("Télécharger rapport PDF", data=pdf_buf, file_name="rapport_s2p.pdf", mime="application/pdf")
