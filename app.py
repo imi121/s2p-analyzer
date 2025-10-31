@@ -1,5 +1,5 @@
 # app.py — Analyse .s2p : Cp / tanδ / ESR / ESL
-# UI premium + SRF + fix conflits de noms (fmt_num / data_fmt)
+# Refactor complet : UI premium (sans emojis) + SRF + lissage + exports
 
 import re, math, cmath, io
 import numpy as np
@@ -11,34 +11,99 @@ from scipy.signal import savgol_filter
 import plotly.graph_objects as go
 
 # ================== PAGE & STYLE ==================
-st.set_page_config(page_title="Analyse .s2p — Cp / tanδ / ESR / ESL", layout="wide", page_icon="📈")
+st.set_page_config(
+    page_title="Analyse .s2p — Cp / tanδ / ESR / ESL",
+    layout="wide"
+)
+
 st.markdown("""
 <style>
-:root{ --card-bg: rgba(255,255,255,0.78); --glass: blur(10px) saturate(1.2); }
-.main .block-container {padding-top: .8rem; padding-bottom: 2rem; max-width: 1200px;}
+:root{
+  --primary:#4F46E5; --primary-600:#4F46E5; --primary-700:#4338CA;
+  --accent:#06B6D4; --success:#16A34A; --warn:#EA580C; --danger:#DC2626;
+  --bg:#F5F7FB; --card:rgba(255,255,255,.82); --muted:#6B7280; --ink:#0B1220;
+  --ring: rgba(79,70,229,.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root{
+    --bg:#0B1220; --card:rgba(17,24,39,.72); --muted:#9CA3AF; --ink:#F3F4F6;
+  }
+}
+
+html, body, .main { background: var(--bg); }
+.main .block-container { padding-top: .9rem; padding-bottom: 2rem; max-width: 1200px; }
+
 .hero{
-  background: linear-gradient(135deg,#0f172a 0%,#1e293b 50%, #3b82f6 100%);
+  background: radial-gradient(1200px 400px at 0% 0%, rgba(79,70,229,.30), transparent 60%),
+              linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #334155 100%);
+  border: 1px solid rgba(255,255,255,.08);
   border-radius: 18px; padding: 26px 28px; color: #fff;
   box-shadow: 0 16px 40px rgba(0,0,0,.25);
 }
-.hero h1{margin: 0; letter-spacing:.3px;}
-.hero p{opacity:.9; margin:.2rem 0 0;}
+.hero h1{margin: 0; letter-spacing:.2px; font-weight:800;}
+.hero p{opacity:.9; margin:.35rem 0 0;}
+
 .badges{display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.8rem}
-.badge{background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25);
-  padding: 6px 10px; border-radius: 999px; font-size:.86rem; display:flex; gap:.45rem;}
-.kpi-grid{display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:14px;}
-.kpi-card{
-  backdrop-filter: var(--glass); background: var(--card-bg); border: 1px solid rgba(0,0,0,.06);
-  border-radius: 16px; padding: 16px 18px; box-shadow: 0 6px 20px rgba(0,0,0,.06);
+.badge{
+  background: rgba(255,255,255,.10);
+  border: 1px solid rgba(255,255,255,.20);
+  padding: 6px 10px; border-radius: 999px; font-size:.86rem;
+  display:flex; gap:.45rem; align-items:center;
 }
-.kpi-title{font-size:.88rem; color:#5b6574; margin:0 0 6px;}
-.kpi-value{font-size:1.9rem; font-weight:800; color:#0f172a; letter-spacing:.2px;}
-.kpi-sub{font-size:.82rem; color:#6b7280; margin-top:2px}
-.sep{border:none; border-top:1px solid #eceff3; margin:18px 0}
+
+.kpi-grid{display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:16px;}
+.kpi-card{
+  backdrop-filter: blur(10px) saturate(1.15);
+  background: var(--card);
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 16px; padding: 16px 18px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.06);
+}
+.kpi-head{display:flex; align-items:center; gap:10px; margin-bottom:8px;}
+.kpi-icon{width:22px; height:22px; color: var(--primary);}
+.kpi-title{font-size:.90rem; color:var(--muted); margin:0;}
+.kpi-value{font-size:2.0rem; font-weight:800; color:var(--ink); letter-spacing:.2px; line-height:1.05;}
+.kpi-unit{font-size:1.1rem; font-weight:600; opacity:.7; margin-left:.25rem}
+.kpi-sub{font-size:.82rem; color:var(--muted); margin-top:4px}
+
+.sep{border:none; border-top:1px solid rgba(0,0,0,.07); margin:18px 0}
 [data-baseweb="tab-list"]{gap:.4rem}
 footer{visibility:hidden;}
+
+.stDownloadButton button{
+  border-radius:10px; border:1px solid rgba(0,0,0,.08);
+  box-shadow: 0 6px 18px rgba(0,0,0,.06);
+}
+.stSlider > div[data-baseweb="slider"] div[role="slider"]{
+  box-shadow: 0 0 0 4px var(--ring);
+}
 </style>
 """, unsafe_allow_html=True)
+
+# ================== ICONES (SVG inline) ==================
+def svg_icon(name:str)->str:
+    # Icônes minimalistes (Lucide-like) en paths
+    icons = {
+        "freq": '<path d="M4 12h3l2 6 4-12 2 6h5" />',
+        "esr":  '<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /><path d="M19.4 15a1.6 1.6 0 0 0 .33 1.8l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.6 1.6 0 0 0 15 19.4 1.6 1.6 0 0 0 14 20.9a2 2 0 1 1-4 0 1.6 1.6 0 0 0-1-1.5A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8-.33 2 2 0 1 1-2.83-2.83A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-.6-1 1.6 1.6 0 0 0-1.8-.33 2 2 0 1 1 0-3.37 1.6 1.6 0 0 0 1-.33A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0 .33-1.82 2 2 0 1 1 2.83-2.83A1.6 1.6 0 0 0 9 4.6c.31-.12.65-.12.96 0A1.6 1.6 0 0 0 11 4.6a1.6 1.6 0 0 0 .33-1.82 2 2 0 1 1 3.37 0A1.6 1.6 0 0 0 15 4.6a1.6 1.6 0 0 0 1.82.33 2 2 0 1 1 2.83 2.83A1.6 1.6 0 0 0 19.4 9c.12.31.12.65 0 .96.12.31.12.65 0 .96Z"/>',
+        "cp":   '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="M3.27 6.96 12 12l8.73-5.04"/><path d="M12 22V12"/>',
+        "tan":  '<path d="M3 12h18M12 3v18"/><path d="M5 10c4-6 10-6 14 0"/>',
+        "esl":  '<path d="M4 12c0-3 2-5 5-5s5 2 5 5-2 5-5 5-5-2-5-5Z"/><path d="M14 12c0-3 2-5 5-5"/>',
+        "bolt": '<path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/>'
+    }
+    path = icons.get(name, "")
+    return f'<svg class="kpi-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">{path}</svg>'
+
+def kpi_card(title:str, value:str, unit:str="", sub:str="", icon:str=""):
+    html = f"""
+    <div class="kpi-card">
+      <div class="kpi-head">{svg_icon(icon)}<div class="kpi-title">{title}</div></div>
+      <div class="kpi-value">{value}<span class="kpi-unit">{' '+unit if unit else ''}</span></div>
+      <div class="kpi-sub">{sub}</div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 # ================== UNITS & HELPERS ==================
 SI_FREQ = {"Hz":1.0, "kHz":1e3, "MHz":1e6, "GHz":1e9}
@@ -61,7 +126,7 @@ def parse_touchstone_s2p(file_like):
     text = file_like.read().decode("utf-8", errors="ignore")
     for raw in text.splitlines():
         line = raw.strip()
-        if not line or line.startswith("!"): 
+        if not line or line.startswith("!"):
             continue
 
         if line.startswith("#"):
@@ -168,10 +233,10 @@ st.markdown("""
   <h1>Analyse <i>.s2p</i> — Cp / tanδ / ESR / ESL</h1>
   <p>Lecture Touchstone, extraction paramétrique, KPIs à f₀, courbes & rapport, avec détection SRF.</p>
   <div class="badges">
-    <div class="badge">🔧 Série/Parallèle</div>
-    <div class="badge">📎 Export CSV & PDF</div>
-    <div class="badge">📡 Lissage Savitzky–Golay</div>
-    <div class="badge">⚡ Détection SRF</div>
+    <div class="badge">Série / Parallèle</div>
+    <div class="badge">Export CSV & PDF</div>
+    <div class="badge">Lissage Savitzky–Golay</div>
+    <div class="badge">Détection SRF</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -181,7 +246,7 @@ st.write("")
 uploaded = st.file_uploader("Dépose ton fichier .s2p", type=["s2p"])
 
 with st.sidebar:
-    st.header("Options d'analyse")
+    st.header("Options d’analyse")
     c1,c2 = st.columns(2)
     f0_val = c1.number_input("Fréquence f₀", value=1.0, min_value=0.0, format="%.6f")
     f0_unit = c2.selectbox("Unité f₀", list(SI_FREQ.keys()), index=3)
@@ -202,7 +267,7 @@ with st.sidebar:
     sg_poly = st.number_input("Ordre polynôme", min_value=1, value=2, step=1)
 
     st.markdown("---")
-    st.subheader("Unités d'affichage (KPIs)")
+    st.subheader("Unités d’affichage (KPIs)")
     uC  = st.selectbox("Unité Cp", list(SI_CAP.keys()), index=4)
     uL  = st.selectbox("Unité ESL", list(SI_IND.keys()), index=3)
     uR  = st.selectbox("Unité ESR", list(SI_RES.keys()), index=0)
@@ -233,7 +298,7 @@ if uploaded:
         # Slider f0 dans la bande
         if len(df) >= 2:
             fmin_b, fmax_b = float(df["freq_Hz"].min()), float(df["freq_Hz"].max())
-            st.slider("Ajuste f₀ (dans la bande chargée)", 
+            st.slider("Ajuste f₀ (dans la bande chargée)",
                       min_value=fmin_b, max_value=fmax_b,
                       value=float(np.clip(f0, fmin_b, fmax_b)),
                       step=float((fmax_b-fmin_b)/1000.0) if fmax_b>fmin_b else 1.0,
@@ -265,50 +330,35 @@ if uploaded:
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-title">Fréquence f₀ ({uF0})</div><div class="kpi-value">🛰️ {fmt_num(f0_disp)}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="kpi-sub">Référence pour l’interpolation</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-title">ESR @ f₀ ({uR})</div><div class="kpi-value">⚙️ {fmt_num(ESR_disp)}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="kpi-sub">Résistance série équivalente</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            kpi_card(f"Fréquence f₀ ({uF0})", fmt_num(f0_disp), unit=uF0,
+                     sub="Référence pour l’interpolation", icon="freq")
+            kpi_card(f"ESR @ f₀ ({uR})", fmt_num(ESR_disp), unit=uR,
+                     sub="Résistance série équivalente", icon="esr")
 
         with col2:
-            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-title">Cp @ f₀ ({uC})</div><div class="kpi-value">📦 {fmt_num(Cp_disp)}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="kpi-sub">Capacitance parallèle (B/ω)</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-title">tanδ @ f₀ (—)</div><div class="kpi-value">🔥 {fmt_num(tanD_f0)}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="kpi-sub">tanδ = G/|B| ; Q = 1/tanδ</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            kpi_card(f"Cp @ f₀ ({uC})", fmt_num(Cp_disp), unit=uC,
+                     sub="Capacitance parallèle (B/ω)", icon="cp")
+            kpi_card("tanδ @ f₀ (—)", fmt_num(tanD_f0), unit="",
+                     sub="tanδ = G/|B| ; Q = 1/tanδ", icon="tan")
 
         with col3:
-            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-title">ESL @ f₀ ({uL})</div><div class="kpi-value">🧲 {fmt_num(ESL_disp)}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="kpi-sub">Inductance série équivalente (X>0)</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
-            srftxt = "N/A" if not np.isfinite(srf_freq) else f"{fmt_num(srf_disp)} {uF0}"
-            st.markdown(f'<div class="kpi-title">SRF estimée</div><div class="kpi-value">⚡ {srftxt}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="kpi-sub">Croisement Im{Zin} = 0</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            kpi_card(f"ESL @ f₀ ({uL})", fmt_num(ESL_disp), unit=uL,
+                     sub="Inductance série équivalente (X>0)", icon="esl")
+            kpi_card("SRF estimée", "N/A" if not np.isfinite(srf_freq) else fmt_num(srf_disp), unit=uF0 if np.isfinite(srf_freq) else "",
+                     sub="Croisement Im{Zin} = 0", icon="bolt")
 
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('<hr class="sep">', unsafe_allow_html=True)
 
-        # ================== JAUGES (Plotly) ==================
+        # ================== GAUGES (Plotly minimalistes) ==================
         def gauge(value, title, suffix="", vmax=None):
             if not np.isfinite(value): value, vmax = 0, 1
             if vmax is None: vmax = 10**np.ceil(np.log10(abs(value)+1e-30))
             fig = go.Figure(go.Indicator(
                 mode="gauge+number", value=value,
                 number={'suffix': f" {suffix}"},
-                gauge={'axis': {'range': [None, vmax]}, 'bar': {'thickness': 0.3},
+                gauge={'axis': {'range': [None, vmax]},
+                       'bar': {'thickness': 0.35},
                        'borderwidth': 1, 'bgcolor': "white"},
                 title={'text': title}
             ))
@@ -323,7 +373,7 @@ if uploaded:
         st.markdown('<hr class="sep">', unsafe_allow_html=True)
 
         # ================== TABS : COURBES / DONNÉES / EXPORT ==================
-        tab1, tab2, tab3 = st.tabs(["📊 Courbes", "🧾 Données", "📎 Export"])
+        tab1, tab2, tab3 = st.tabs(["Courbes", "Données", "Export"])
 
         with tab1:
             def fig_loglog(x, y, xlabel, ylabel, title, positive_y=True, markers=None):
@@ -338,6 +388,7 @@ if uploaded:
                             ax.axvline(fx, linestyle="--", alpha=0.6); ax.text(fx, ax.get_ylim()[1], lbl, rotation=90, va="top", ha="right")
                 ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, which="both")
                 return fig
+
             def fig_semilogx(x, y, xlabel, ylabel, title, markers=None):
                 x = np.asarray(x,float); y = np.asarray(y,float)
                 m = np.isfinite(x) & np.isfinite(y) & (x>0)
@@ -373,13 +424,12 @@ if uploaded:
                 buf = io.BytesIO()
                 with PdfPages(buf) as pdf:
                     # Page 1 — résumé
-                    fig, ax = plt.subplots(figsize=(8.27, 11.69))
+                    fig, ax = plt.subplots(figsize=(8.27, 11.69))  # A4 portrait
                     ax.axis("off")
+                    title = "Rapport d'analyse .s2p"
+                    ax.text(0.05, 0.97, title, va="top", fontsize=18, fontweight="bold", color="#111")
                     lines = [
-                        "Rapport d'analyse .s2p",
-                        "",
-                        meta,
-                        "",
+                        meta, "",
                         f"f₀ = {fmt_num(to_unit(f0, SI_FREQ[uF0]))} {uF0}",
                         f"ESR(f₀) = {fmt_num(ESR_disp)} {uR}",
                         f"Cp(f₀) = {fmt_num(Cp_disp)} {uC}",
@@ -388,7 +438,7 @@ if uploaded:
                         f"Q(f₀) = {fmt_num(Q_f0)} (—)",
                         f"SRF ≈ {fmt_num(srf_disp)} {uF0}",
                     ]
-                    ax.text(0.05, 0.95, "\n".join(lines), va="top", fontsize=11)
+                    ax.text(0.05, 0.90, "\n".join(lines), va="top", fontsize=11)
                     pdf.savefig(fig); plt.close(fig)
 
                     # Pages graphes
