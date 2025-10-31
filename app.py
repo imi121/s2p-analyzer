@@ -1,7 +1,5 @@
-# app.py — Analyse .s2p : Cp / tanδ / ESR / ESL (UI premium + SRF + fix fmt)
-# ---------------------------------------------------------------------------------
-# Dépendances : streamlit, numpy, pandas, matplotlib, scipy, plotly
-# ---------------------------------------------------------------------------------
+# app.py — Analyse .s2p : Cp / tanδ / ESR / ESL
+# UI premium + SRF + fix conflits de noms (fmt_num / data_fmt)
 
 import re, math, cmath, io
 import numpy as np
@@ -16,49 +14,29 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="Analyse .s2p — Cp / tanδ / ESR / ESL", layout="wide", page_icon="📈")
 st.markdown("""
 <style>
-:root{
-  --card-bg: rgba(255,255,255,0.78);
-  --glass: blur(10px) saturate(1.2);
-}
-.main .block-container {padding-top: 0.8rem; padding-bottom: 2rem; max-width: 1200px;}
-/* Hero */
+:root{ --card-bg: rgba(255,255,255,0.78); --glass: blur(10px) saturate(1.2); }
+.main .block-container {padding-top: .8rem; padding-bottom: 2rem; max-width: 1200px;}
 .hero{
   background: linear-gradient(135deg,#0f172a 0%,#1e293b 50%, #3b82f6 100%);
-  border-radius: 18px;
-  padding: 26px 28px;
-  color: #fff;
+  border-radius: 18px; padding: 26px 28px; color: #fff;
   box-shadow: 0 16px 40px rgba(0,0,0,.25);
-  position: relative; overflow: hidden;
 }
 .hero h1{margin: 0; letter-spacing:.3px;}
 .hero p{opacity:.9; margin:.2rem 0 0;}
-/* Badges */
 .badges{display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.8rem}
-.badge{
-  background: rgba(255,255,255,.12);
-  border: 1px solid rgba(255,255,255,.25);
-  padding: 6px 10px; border-radius: 999px; font-size:.86rem;
-  display:flex; align-items:center; gap:.45rem;
-}
-/* Cards */
+.badge{background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25);
+  padding: 6px 10px; border-radius: 999px; font-size:.86rem; display:flex; gap:.45rem;}
 .kpi-grid{display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:14px;}
 .kpi-card{
-  backdrop-filter: var(--glass);
-  background: var(--card-bg);
-  border: 1px solid rgba(0,0,0,.06);
-  border-radius: 16px;
-  padding: 16px 18px;
-  box-shadow: 0 6px 20px rgba(0,0,0,.06);
+  backdrop-filter: var(--glass); background: var(--card-bg); border: 1px solid rgba(0,0,0,.06);
+  border-radius: 16px; padding: 16px 18px; box-shadow: 0 6px 20px rgba(0,0,0,.06);
 }
 .kpi-title{font-size:.88rem; color:#5b6574; margin:0 0 6px;}
 .kpi-value{font-size:1.9rem; font-weight:800; color:#0f172a; letter-spacing:.2px;}
 .kpi-sub{font-size:.82rem; color:#6b7280; margin-top:2px}
 .sep{border:none; border-top:1px solid #eceff3; margin:18px 0}
-/* Alerts */
-.stAlert{border-radius:14px !important;}
-/* Tabs */
 [data-baseweb="tab-list"]{gap:.4rem}
-footer {visibility:hidden;}
+footer{visibility:hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -74,7 +52,7 @@ def to_unit(x, factor):
 def fmt_num(x, digits=6):
     return "N/A" if (x is None or not np.isfinite(x)) else f"{x:.{digits}g}"
 
-# ================== PARSING TOUCHSTONE ==================
+# ================== PARSER TOUCHSTONE ==================
 def parse_touchstone_s2p(file_like):
     """Retourne freqs, S11, S21, S12, S22, Z0, data_fmt, freq_unit."""
     freq_unit = "Hz"; data_fmt = "RI"; z0 = 50.0
@@ -83,15 +61,15 @@ def parse_touchstone_s2p(file_like):
     text = file_like.read().decode("utf-8", errors="ignore")
     for raw in text.splitlines():
         line = raw.strip()
-        if not line or line.startswith("!"):
+        if not line or line.startswith("!"): 
             continue
 
         if line.startswith("#"):
             t = line[1:].strip().split()
             T = [x.upper() for x in t]
-            for u in ["HZ", "KHZ", "MHZ", "GHZ"]:
+            for u in ["HZ","KHZ","MHZ","GHZ"]:
                 if u in T: freq_unit = u.capitalize(); break
-            for f in ["RI", "MA", "DB"]:
+            for f in ["RI","MA","DB"]:
                 if f in T: data_fmt = f; break
             if "R" in T:
                 i = T.index("R")
@@ -112,94 +90,76 @@ def parse_touchstone_s2p(file_like):
         f_Hz = fval * mult.get(freq_unit, 1.0)
         a = list(map(float, parts[1:9]))
 
-        def cplx(x, y, fmtname):
-            if fmtname == "RI": return complex(x, y)
-            if fmtname == "MA": return x * cmath.exp(1j*math.radians(y))
-            if fmtname == "DB": return (10**(x/20.0)) * cmath.exp(1j*math.radians(y))
-            return complex(x, y)
+        def cplx(x,y,fmtname):
+            if fmtname=="RI": return complex(x,y)
+            if fmtname=="MA": return x*cmath.exp(1j*math.radians(y))
+            if fmtname=="DB": return (10**(x/20.0))*cmath.exp(1j*math.radians(y))
+            return complex(x,y)
 
-        S11 = cplx(a[0], a[1], data_fmt); S21 = cplx(a[2], a[3], data_fmt)
-        S12 = cplx(a[4], a[5], data_fmt); S22 = cplx(a[6], a[7], data_fmt)
+        S11=cplx(a[0],a[1],data_fmt); S21=cplx(a[2],a[3],data_fmt)
+        S12=cplx(a[4],a[5],data_fmt); S22=cplx(a[6],a[7],data_fmt)
         freqs.append(f_Hz); S11_list.append(S11); S21_list.append(S21); S12_list.append(S12); S22_list.append(S22)
 
     if not freqs:
         raise ValueError("Aucune donnée valide dans le fichier .s2p.")
 
-    return (np.asarray(freqs, float),
-            np.asarray(S11_list, complex),
-            np.asarray(S21_list, complex),
-            np.asarray(S12_list, complex),
-            np.asarray(S22_list, complex),
+    return (np.asarray(freqs,float),
+            np.asarray(S11_list,complex),
+            np.asarray(S21_list,complex),
+            np.asarray(S12_list,complex),
+            np.asarray(S22_list,complex),
             float(z0), data_fmt, freq_unit)
 
 # ================== CALCULS ==================
-def s11_to_zin(S11, Z0):
+def s11_to_zin(S11, Z0): 
     return Z0*(1+S11)/(1-S11)
 
 def compute_params_from_s11(freqs, S11, Z0):
-    """DataFrame avec Cp, tanD, ESR, ESL, etc. + Zin/Yin."""
     w = 2*np.pi*freqs
     Zin = s11_to_zin(S11, Z0)
     Yin = 1.0/Zin
     G, B = np.real(Yin), np.imag(Yin)
-
     with np.errstate(divide='ignore', invalid='ignore'):
-        Cp   = np.where(w != 0, B/w, np.nan)
-        tanD = np.where(B != 0, G/np.abs(B), np.nan)
-
+        Cp   = np.where(w!=0, B/w, np.nan)
+        tanD = np.where(B!=0, G/np.abs(B), np.nan)
     Rs, Xs = np.real(Zin), np.imag(Zin)
     with np.errstate(divide='ignore', invalid='ignore'):
-        Cs = np.where(Xs < 0, -1.0/(w*Xs), np.nan)
-        Ls = np.where(Xs > 0,  Xs/w, np.nan)
-
-    df = pd.DataFrame({
-        "freq_Hz": freqs,
-        "Cp_F":    Cp,
-        "tanD":    tanD,
-        "ESR_Ohm": Rs,
-        "ESL_H":   Ls,
-        "Cs_F":    Cs,
-        "Xs_Ohm":  Xs
-    })
+        Cs = np.where(Xs<0, -1.0/(w*Xs), np.nan)
+        Ls = np.where(Xs>0,  Xs/w, np.nan)
+    df = pd.DataFrame({"freq_Hz":freqs,"Cp_F":Cp,"tanD":tanD,"ESR_Ohm":Rs,"ESL_H":Ls,"Cs_F":Cs,"Xs_Ohm":Xs})
     return df, Zin, Yin
 
 def band_decimate(df, fmin, fmax, decim):
-    d = df[(df["freq_Hz"] >= fmin) & (df["freq_Hz"] <= fmax)].copy()
-    if decim > 1:
-        d = d.iloc[::decim, :].reset_index(drop=True)
+    d = df[(df["freq_Hz"]>=fmin) & (df["freq_Hz"]<=fmax)].copy()
+    if decim>1: d = d.iloc[::decim,:].reset_index(drop=True)
     return d
 
 def savgol_opt(y, win, poly):
     if not win or not poly: return y
     win = int(win)
-    if win % 2 == 0: win += 1
-    if win < 3 or win > len(y): return y
-    try:
-        return savgol_filter(y, win, int(poly))
-    except:
-        return y
+    if win%2==0: win += 1
+    if win<3 or win>len(y): return y
+    try: return savgol_filter(y, win, int(poly))
+    except: return y
 
 def interp_at(f, y, f0):
-    f = np.asarray(f, float); y = np.asarray(y, float)
+    f = np.asarray(f,float); y = np.asarray(y,float)
     mask = np.isfinite(f) & np.isfinite(y)
     if not np.any(mask): return np.nan
     return float(np.interp(f0, f[mask], y[mask]))
 
 def estimate_srf(freqs, Xs):
-    """SRF ~ fréquence où Im{Zin}=0 (changement de signe de Xs)."""
-    f = np.asarray(freqs, float); x = np.asarray(Xs, float)
+    """SRF ~ fréquence où Im{Zin}=0."""
+    f = np.asarray(freqs,float); x = np.asarray(Xs,float)
     m = np.isfinite(f) & np.isfinite(x)
     f, x = f[m], x[m]
     s = np.sign(x)
-    idx = np.where(np.diff(s) != 0)[0]  # changement de signe
-    if len(idx) == 0:
-        return np.nan
+    idx = np.where(np.diff(s)!=0)[0]
+    if len(idx)==0: return np.nan
     i = idx[0]
-    # interpolation linéaire autour du zéro
     x1, x2 = x[i], x[i+1]
     f1, f2 = f[i], f[i+1]
-    if (x2 - x1) == 0:
-        return float(f1)
+    if (x2-x1)==0: return float(f1)
     return float(f1 - x1*(f2-f1)/(x2-x1))
 
 # ================== HEADER ==================
@@ -217,20 +177,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.write("")
 
-# ================== SIDEBAR (OPTIONS) ==================
+# ================== SIDEBAR ==================
 uploaded = st.file_uploader("Dépose ton fichier .s2p", type=["s2p"])
 
 with st.sidebar:
     st.header("Options d'analyse")
-    c1, c2 = st.columns(2)
-    f0_val  = c1.number_input("Fréquence f₀", value=1.0, min_value=0.0, format="%.6f")
-    f0_unit = c2.selectbox("Unité f₀", list(SI_FREQ.keys()), index=3)  # GHz
+    c1,c2 = st.columns(2)
+    f0_val = c1.number_input("Fréquence f₀", value=1.0, min_value=0.0, format="%.6f")
+    f0_unit = c2.selectbox("Unité f₀", list(SI_FREQ.keys()), index=3)
 
-    s1, s2 = st.columns(2)
-    fmin_val  = s1.number_input("fmin", value=1.0, min_value=0.0, format="%.6f")
+    s1,s2 = st.columns(2)
+    fmin_val = s1.number_input("fmin", value=1.0, min_value=0.0, format="%.6f")
     fmin_unit = s2.selectbox("Unité fmin", list(SI_FREQ.keys()), index=0)
-    t1, t2 = st.columns(2)
-    fmax_val  = t1.number_input("fmax", value=1e11, min_value=0.0, format="%.6f")
+    t1,t2 = st.columns(2)
+    fmax_val = t1.number_input("fmax", value=1e11, min_value=0.0, format="%.6f")
     fmax_unit = t2.selectbox("Unité fmax", list(SI_FREQ.keys()), index=3)
 
     decim = st.number_input("Décimation (1 = aucune)", min_value=1, value=1, step=1)
@@ -243,15 +203,15 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("Unités d'affichage (KPIs)")
-    uC  = st.selectbox("Unité Cp",  list(SI_CAP.keys()),  index=4)  # pF
-    uL  = st.selectbox("Unité ESL", list(SI_IND.keys()),  index=3)  # nH
-    uR  = st.selectbox("Unité ESR", list(SI_RES.keys()),  index=0)  # Ω
-    uF0 = st.selectbox("Unité fréquence", list(SI_FREQ.keys()), index=3)  # GHz
+    uC  = st.selectbox("Unité Cp", list(SI_CAP.keys()), index=4)
+    uL  = st.selectbox("Unité ESL", list(SI_IND.keys()), index=3)
+    uR  = st.selectbox("Unité ESR", list(SI_RES.keys()), index=0)
+    uF0 = st.selectbox("Unité fréquence", list(SI_FREQ.keys()), index=3)
 
 # Valeurs SI
-f0   = f0_val  * SI_FREQ[f0_unit]
-fmin = fmin_val* SI_FREQ[fmin_unit]
-fmax = fmax_val* SI_FREQ[fmax_unit]
+f0   = f0_val*SI_FREQ[f0_unit]
+fmin = fmin_val*SI_FREQ[fmin_unit]
+fmax = fmax_val*SI_FREQ[fmax_unit]
 
 # ================== MAIN ==================
 if uploaded:
@@ -264,19 +224,20 @@ if uploaded:
         # Bande + décimation + lissage
         df = band_decimate(df, fmin, fmax, int(decim))
         if use_sg:
-            for col in ["Cp_F", "tanD", "ESR_Ohm", "ESL_H", "Xs_Ohm"]:
+            for col in ["Cp_F","tanD","ESR_Ohm","ESL_H","Xs_Ohm"]:
                 df[col] = savgol_opt(df[col].values.astype(float), sg_win, sg_poly)
 
-        # SRF (premier croisement Im{Zin}=0)
+        # SRF
         srf_freq = estimate_srf(df["freq_Hz"], df["Xs_Ohm"])
 
-        # Curseur f0 (si données dispo)
+        # Slider f0 dans la bande
         if len(df) >= 2:
             fmin_b, fmax_b = float(df["freq_Hz"].min()), float(df["freq_Hz"].max())
             st.slider("Ajuste f₀ (dans la bande chargée)", 
-                      min_value=fmin_b, max_value=fmax_b, value=float(np.clip(f0, fmin_b, fmax_b)),
-                      step=float((fmax_b - fmin_b)/1000.0) if fmax_b>fmin_b else 1.0, key="f0_slider")
-            # si l'utilisateur déplace le slider, écrase f0
+                      min_value=fmin_b, max_value=fmax_b,
+                      value=float(np.clip(f0, fmin_b, fmax_b)),
+                      step=float((fmax_b-fmin_b)/1000.0) if fmax_b>fmin_b else 1.0,
+                      key="f0_slider")
             f0 = st.session_state.get("f0_slider", f0)
 
         # KPIs @ f0
@@ -286,10 +247,10 @@ if uploaded:
         tanD_f0 = interp_at(df["freq_Hz"], df["tanD"],    f0)
         Q_f0    = (1.0/tanD_f0) if np.isfinite(tanD_f0) and tanD_f0>0 else np.nan
 
-        if np.isfinite(tanD_f0) and tanD_f0 > 1:
-            st.warning("tanδ@f₀ > 1 → Q très faible. Tu es peut-être hors régime capacitif (proche SRF) ou sans dé-embedding.")
+        if np.isfinite(tanD_f0) and tanD_f0>1:
+            st.warning("tanδ@f₀ > 1 → Q très faible. Proximité SRF / régime inductif ou besoin de dé-embedding.")
 
-        if (f0 < df["freq_Hz"].min()) or (f0 > df["freq_Hz"].max()):
+        if (f0<df["freq_Hz"].min()) or (f0>df["freq_Hz"].max()):
             st.info("f₀ est hors de la bande affichée → interpolation impossible dans cette bande.")
 
         # Conversions pour affichage
@@ -299,42 +260,42 @@ if uploaded:
         f0_disp  = to_unit(f0,     SI_FREQ[uF0])
         srf_disp = to_unit(srf_freq, SI_FREQ[uF0])
 
-        # ================== CARDS (KPIs) ==================
+        # ================== KPI CARDS ==================
         st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
-
         col1, col2, col3 = st.columns(3)
+
         with col1:
             st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
             st.markdown(f'<div class="kpi-title">Fréquence f₀ ({uF0})</div><div class="kpi-value">🛰️ {fmt_num(f0_disp)}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-sub">Référence pour les interpolations</div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-sub">Référence pour l’interpolation</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
             st.markdown(f'<div class="kpi-title">ESR @ f₀ ({uR})</div><div class="kpi-value">⚙️ {fmt_num(ESR_disp)}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-sub">Résistance série équivalente</div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-sub">Résistance série équivalente</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
         with col2:
             st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
             st.markdown(f'<div class="kpi-title">Cp @ f₀ ({uC})</div><div class="kpi-value">📦 {fmt_num(Cp_disp)}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-sub">Capacitance parallèle (B/ω)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-sub">Capacitance parallèle (B/ω)</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
             st.markdown(f'<div class="kpi-title">tanδ @ f₀ (—)</div><div class="kpi-value">🔥 {fmt_num(tanD_f0)}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-sub">tanδ = G/|B| ; Q = 1/tanδ</div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-sub">tanδ = G/|B| ; Q = 1/tanδ</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
         with col3:
             st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
             st.markdown(f'<div class="kpi-title">ESL @ f₀ ({uL})</div><div class="kpi-value">🧲 {fmt_num(ESL_disp)}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-sub">Inductance série équivalente (X>0)</div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-sub">Inductance série équivalente (X>0)</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
             srftxt = "N/A" if not np.isfinite(srf_freq) else f"{fmt_num(srf_disp)} {uF0}"
             st.markdown(f'<div class="kpi-title">SRF estimée</div><div class="kpi-value">⚡ {srftxt}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="kpi-sub">Croisement Im{{Zin}} = 0</div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-sub">Croisement Im{Zin} = 0</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('</div>', unsafe_allow_html=True)
@@ -347,22 +308,21 @@ if uploaded:
             fig = go.Figure(go.Indicator(
                 mode="gauge+number", value=value,
                 number={'suffix': f" {suffix}"},
-                gauge={'axis': {'range': [None, vmax]},
-                       'bar': {'thickness': 0.3},
+                gauge={'axis': {'range': [None, vmax]}, 'bar': {'thickness': 0.3},
                        'borderwidth': 1, 'bgcolor': "white"},
                 title={'text': title}
             ))
             fig.update_layout(margin=dict(l=10,r=10,t=30,b=10), height=250)
             return fig
 
-        g1, g2, g3 = st.columns(3)
-        with g1: st.plotly_chart(gauge(Cp_disp or 0,  f"Cp @ f₀ ({uC})",  suffix=f"{uC}"), use_container_width=True, config={"displayModeBar": False})
-        with g2: st.plotly_chart(gauge(ESR_disp or 0, f"ESR @ f₀ ({uR})", suffix=f"{uR}"), use_container_width=True, config={"displayModeBar": False})
-        with g3: st.plotly_chart(gauge(ESL_disp or 0, f"ESL @ f₀ ({uL})", suffix=f"{uL}"), use_container_width=True, config={"displayModeBar": False})
+        g1,g2,g3 = st.columns(3)
+        with g1: st.plotly_chart(gauge(Cp_disp or 0,  f"Cp @ f₀ ({uC})",  suffix=uC), use_container_width=True, config={"displayModeBar": False})
+        with g2: st.plotly_chart(gauge(ESR_disp or 0, f"ESR @ f₀ ({uR})", suffix=uR), use_container_width=True, config={"displayModeBar": False})
+        with g3: st.plotly_chart(gauge(ESL_disp or 0, f"ESL @ f₀ ({uL})", suffix=uL), use_container_width=True, config={"displayModeBar": False})
 
         st.markdown('<hr class="sep">', unsafe_allow_html=True)
 
-        # ================== ONGLET COURBES / TABLE / EXPORT ==================
+        # ================== TABS : COURBES / DONNÉES / EXPORT ==================
         tab1, tab2, tab3 = st.tabs(["📊 Courbes", "🧾 Données", "📎 Export"])
 
         with tab1:
@@ -373,34 +333,31 @@ if uploaded:
                 fig, ax = plt.subplots()
                 if np.any(m): ax.loglog(x[m], y[m])
                 if markers:
-                    for fx, label in markers:
+                    for fx, lbl in markers:
                         if np.isfinite(fx) and fx>0:
-                            ax.axvline(fx, linestyle="--", alpha=0.6)
-                            ax.text(fx, ax.get_ylim()[1], label, rotation=90, va="top", ha="right")
+                            ax.axvline(fx, linestyle="--", alpha=0.6); ax.text(fx, ax.get_ylim()[1], lbl, rotation=90, va="top", ha="right")
                 ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, which="both")
                 return fig
-
             def fig_semilogx(x, y, xlabel, ylabel, title, markers=None):
                 x = np.asarray(x,float); y = np.asarray(y,float)
                 m = np.isfinite(x) & np.isfinite(y) & (x>0)
                 fig, ax = plt.subplots()
                 if np.any(m): ax.semilogx(x[m], y[m])
                 if markers:
-                    for fx, label in markers:
+                    for fx, lbl in markers:
                         if np.isfinite(fx) and fx>0:
-                            ax.axvline(fx, linestyle="--", alpha=0.6)
-                            ax.text(fx, ax.get_ylim()[1], label, rotation=90, va="top", ha="right")
+                            ax.axvline(fx, linestyle="--", alpha=0.6); ax.text(fx, ax.get_ylim()[1], lbl, rotation=90, va="top", ha="right")
                 ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, which="both")
                 return fig
 
             markers = []
-            if np.isfinite(f0):      markers.append((f0, "f₀"))
+            if np.isfinite(f0): markers.append((f0, "f₀"))
             if np.isfinite(srf_freq): markers.append((srf_freq, "SRF"))
 
-            c1, c2 = st.columns(2)
+            c1,c2 = st.columns(2)
             with c1:
                 st.pyplot(fig_loglog(df["freq_Hz"], np.abs(df["Cp_F"]), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp", markers=markers))
-                st.pyplot(fig_loglog(df["freq_Hz"], np.clip(df["ESR_Ohm"].astype(float), 1e-15, None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)", positive_y=True, markers=markers))
+                st.pyplot(fig_loglog(df["freq_Hz"], np.clip(df["ESR_Ohm"].astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)", markers=markers))
             with c2:
                 st.pyplot(fig_semilogx(df["freq_Hz"], df["tanD"], "Fréquence (Hz)", "tanδ (—)", "Facteur de pertes tanδ", markers=markers))
                 st.pyplot(fig_loglog(df["freq_Hz"], np.abs(df["ESL_H"].astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)", markers=markers))
@@ -457,7 +414,7 @@ if uploaded:
 
                     pdf.savefig(fig_loglog_simple(f, np.abs(df["Cp_F"].values), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp")); plt.close()
                     pdf.savefig(fig_semilogx_simple(f, df["tanD"].values, "Fréquence (Hz)", "tanδ (—)", "Facteur de pertes tanδ")); plt.close()
-                    pdf.savefig(fig_loglog_simple(f, np.clip(df["ESR_Ohm"].values.astype(float), 1e-15, None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)")); plt.close()
+                    pdf.savefig(fig_loglog_simple(f, np.clip(df["ESR_Ohm"].values.astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)")); plt.close()
                     pdf.savefig(fig_loglog_simple(f, np.abs(df["ESL_H"].values.astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)")); plt.close()
                 buf.seek(0)
                 return buf
