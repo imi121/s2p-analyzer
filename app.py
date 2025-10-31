@@ -1,6 +1,4 @@
-# app.py — S2P Analyzer Pro : Cp / tanδ / ESR / ESL + métriques + rapport PDF
-# Auteur : imane — usage académique/indus
-
+# app.py — Analyse .s2p : Cp / tanδ / ESR / ESL (UI soignée + unités convertibles + métriques @ f0)
 import re, math, cmath, io
 import numpy as np
 import pandas as pd
@@ -9,75 +7,69 @@ from matplotlib.backends.backend_pdf import PdfPages
 import streamlit as st
 from scipy.signal import savgol_filter
 
-st.set_page_config(page_title="S2P Analyzer Pro — Cp / tanδ / ESR / ESL", layout="wide")
+# ---------- Page & style ----------
+st.set_page_config(page_title="Analyse .s2p — Cp / tanδ / ESR / ESL", layout="wide")
+st.markdown("""
+<style>
+/* Nettoyage et typographie */
+.main .block-container {padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1200px;}
+h1, h2, h3 { font-weight: 700; letter-spacing: .2px; }
+.kpi-card {background: #ffffff; border: 1px solid #ececec; border-radius: 14px; padding: 14px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.04);}
+.kpi-title {font-size: .9rem; color: #666; margin-bottom: 6px;}
+.kpi-value {font-size: 1.6rem; font-weight: 700; color: #111;}
+.kpi-row {gap: 12px;}
+hr {border: none; border-top: 1px solid #eee; margin: 18px 0;}
+/* Cache le footer streamlit pour un rendu clean */
+footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
 
-# =========================
-# Parsing Touchstone .s2p
-# =========================
+# ---------- Utils unités ----------
+SI_FREQ = {"Hz":1.0, "kHz":1e3, "MHz":1e6, "GHz":1e9}
+SI_CAP  = {"F":1.0, "mF":1e-3, "µF":1e-6, "nF":1e-9, "pF":1e-12, "fF":1e-15}
+SI_IND  = {"H":1.0, "mH":1e-3, "µH":1e-6, "nH":1e-9, "pH":1e-12}
+SI_RES  = {"Ω":1.0, "mΩ":1e-3, "kΩ":1e3}
+def to_unit(x, factor): 
+    return None if (x is None or not np.isfinite(x)) else float(x)/factor
+def fmt(x, digits=6):
+    return "N/A" if (x is None or not np.isfinite(x)) else f"{x:.{digits}g}"
+
+# ---------- Parsing ----------
 def parse_touchstone_s2p(file_like):
-    freq_unit = "Hz"
-    data_format = "RI"  # RI, MA, DB
-    z0 = 50.0
+    freq_unit = "Hz"; data_format = "RI"; z0 = 50.0
     freqs, S11_list, S21_list, S12_list, S22_list = [], [], [], [], []
-
     text = file_like.read().decode("utf-8", errors="ignore")
     for raw in text.splitlines():
         line = raw.strip()
-        if not line or line.startswith("!"):
-            continue
-
+        if not line or line.startswith("!"): continue
         if line.startswith("#"):
-            tokens = line[1:].strip().split()
-            tokens_upper = [t.upper() for t in tokens]
-            for u in ["HZ", "KHZ", "MHZ", "GHZ"]:
-                if u in tokens_upper:
-                    freq_unit = u.capitalize()
-                    break
-            for fmt in ["RI", "MA", "DB"]:
-                if fmt in tokens_upper:
-                    data_format = fmt
-                    break
-            if "R" in tokens_upper:
-                idx = tokens_upper.index("R")
-                if idx + 1 < len(tokens):
-                    try: z0 = float(tokens[idx + 1])
+            t = line[1:].strip().split(); T = [x.upper() for x in t]
+            for u in ["HZ","KHZ","MHZ","GHZ"]:
+                if u in T: freq_unit = u.capitalize(); break
+            for f in ["RI","MA","DB"]:
+                if f in T: data_format = f; break
+            if "R" in T:
+                i = T.index("R")
+                if i+1 < len(t):
+                    try: z0 = float(t[i+1])
                     except: pass
             continue
-
         parts = re.split(r"\s+", line)
-        if len(parts) < 9:
-            continue
-        try:
-            fval = float(parts[0])
-        except:
-            continue
-
+        if len(parts) < 9: continue
+        try: fval = float(parts[0])
+        except: continue
         mult = {"Hz":1.0, "KHz":1e3, "kHz":1e3, "MHz":1e6, "GHz":1e9}
-        f_Hz = fval * mult.get(freq_unit, 1.0)
-        vals = list(map(float, parts[1:9]))
-
-        def to_complex(a,b,fmt):
-            if fmt == "RI":
-                return complex(a,b)
-            elif fmt == "MA":
-                return a * cmath.exp(1j * math.radians(b))
-            elif fmt == "DB":
-                mag = 10**(a/20.0)
-                return mag * cmath.exp(1j * math.radians(b))
-            return complex(a,b)
-
-        S11 = to_complex(vals[0], vals[1], data_format)
-        S21 = to_complex(vals[2], vals[3], data_format)
-        S12 = to_complex(vals[4], vals[5], data_format)
-        S22 = to_complex(vals[6], vals[7], data_format)
-
-        freqs.append(f_Hz)
-        S11_list.append(S11); S21_list.append(S21)
-        S12_list.append(S12); S22_list.append(S22)
-
-    if not freqs:
-        raise ValueError("Aucune donnée valide dans le .s2p")
-
+        f_Hz = fval*mult.get(freq_unit,1.0)
+        a = list(map(float, parts[1:9]))
+        def cplx(x,y,fmt):
+            if fmt=="RI": return complex(x,y)
+            if fmt=="MA": return x*cmath.exp(1j*math.radians(y))
+            if fmt=="DB": return (10**(x/20.0))*cmath.exp(1j*math.radians(y))
+            return complex(x,y)
+        S11=cplx(a[0],a[1],data_format); S21=cplx(a[2],a[3],data_format)
+        S12=cplx(a[4],a[5],data_format); S22=cplx(a[6],a[7],data_format)
+        freqs.append(f_Hz); S11_list.append(S11); S21_list.append(S21); S12_list.append(S12); S22_list.append(S22)
+    if not freqs: raise ValueError("Aucune donnée valide dans le .s2p")
     return (np.asarray(freqs,float),
             np.asarray(S11_list,complex),
             np.asarray(S21_list,complex),
@@ -85,157 +77,60 @@ def parse_touchstone_s2p(file_like):
             np.asarray(S22_list,complex),
             float(z0), data_format, freq_unit)
 
-# =========================
-# Calculs de base
-# =========================
-def s11_to_zin(S11, Z0):  # Z_in = Z0(1+Γ)/(1-Γ)
-    return Z0 * (1 + S11) / (1 - S11)
-
+# ---------- Calculs ----------
+def s11_to_zin(S11, Z0): return Z0*(1+S11)/(1-S11)
 def compute_params_from_s11(freqs, S11, Z0):
-    omega = 2*np.pi*freqs
+    w = 2*np.pi*freqs
     Zin = s11_to_zin(S11, Z0)
-    Yin = 1.0 / Zin
+    Yin = 1.0/Zin
     G, B = np.real(Yin), np.imag(Yin)
     with np.errstate(divide='ignore', invalid='ignore'):
-        Cp = np.where(omega!=0, B/omega, np.nan)
+        Cp   = np.where(w!=0, B/w, np.nan)
         tanD = np.where(B!=0, G/np.abs(B), np.nan)
     Rs, Xs = np.real(Zin), np.imag(Zin)
     with np.errstate(divide='ignore', invalid='ignore'):
-        Cs = np.where(Xs<0, -1.0/(omega*Xs), np.nan)
-        Ls = np.where(Xs>0,  Xs/omega, np.nan)  # ESL quand X>0
-    return pd.DataFrame({
-        "freq_Hz": freqs, "Cp_F": Cp, "tanD": tanD,
-        "ESR_Ohm": Rs, "ESL_H": Ls, "Cs_F": Cs, "Ls_H": Ls
-    }), Zin, Yin
+        Cs = np.where(Xs<0, -1.0/(w*Xs), np.nan)
+        Ls = np.where(Xs>0,  Xs/w, np.nan)
+    df = pd.DataFrame({"freq_Hz":freqs,"Cp_F":Cp,"tanD":tanD,"ESR_Ohm":Rs,"ESL_H":Ls,"Cs_F":Cs,"Ls_H":Ls})
+    return df, Zin, Yin
 
-# =========================
-# Outils “prof de carac”
-# =========================
-def apply_band_and_decimate(df, fmin, fmax, decim):
+def band_decimate(df, fmin, fmax, decim):
     d = df[(df["freq_Hz"]>=fmin) & (df["freq_Hz"]<=fmax)].copy()
-    if decim > 1:
-        d = d.iloc[::decim, :].reset_index(drop=True)
+    if decim>1: d = d.iloc[::decim,:].reset_index(drop=True)
     return d
 
-def apply_savgol(y, win, poly):
-    if win is None or win < 3 or poly is None:
-        return y
-    win = int(win) + (int(win)%2==0)  # fenêtre impaire
-    if win < 3 or win > len(y):
-        return y
-    try:
-        return savgol_filter(y, window_length=win, polyorder=int(poly))
-    except Exception:
-        return y
+def savgol_opt(y, win, poly):
+    if not win or not poly: return y
+    win = int(win); 
+    if win%2==0: win += 1
+    if win<3 or win>len(y): return y
+    try: return savgol_filter(y, win, int(poly))
+    except: return y
 
-def estimate_metrics(df, target_freq, low_cap_max, high_L_min):
-    f = df["freq_Hz"].values
-    Rs = df["ESR_Ohm"].values.astype(float)
-    Xs = (2*np.pi*f*df["ESL_H"].fillna(0).values).astype(float)  # juste pour signe au-dessus SRF
-    Cp = df["Cp_F"].values.astype(float)
-    tanD = df["tanD"].values.astype(float)
-    Ls = df["ESL_H"].values.astype(float)
+def interp_at(f, y, f0):
+    f = np.asarray(f,float); y = np.asarray(y,float)
+    mask = np.isfinite(f) & np.isfinite(y)
+    if not np.any(mask): return np.nan
+    return float(np.interp(f0, f[mask], y[mask]))
 
-    # SRF = zéro de Xs (imag(Z)=0) ≈ zéro de 1/(ωCp) + ωL -> recherche changement de signe de imag(Z)
-    Zin_re = Rs
-    Zin_im = np.imag(s11_to_zin((0*f).astype(complex)+0j, 50)) # placeholder non utilisé
-    # meilleur: recalculer directement imag(Z) depuis série:
-    omega = 2*np.pi*f
-    # On recompose Xs depuis Cs/Ls approchés: préfèrons imag(Zin) depuis Rs + j*Xs
-    # Ici, on le recalcule proprement via Cp & Ls n’est pas fiable autour de SRF, donc on refait à partir d’origine :
-    # (plus simple: considérer signe de Cs/Ls: SRF ~ freq où Cs devient NaN et Ls apparait)
-    srf = np.nan
-    sign = np.sign(df["Cs_F"].fillna(0).values*(-1))  # Cs existe => capacitif
-    trans = np.where(np.diff(sign) != 0)[0]
-    if trans.size > 0:
-        srf = f[trans[0]+1]
-
-    # Cp basse fréquence (médiane sous low_cap_max)
-    mask_lowC = f <= low_cap_max
-    Cp_lf = np.nanmedian(Cp[mask_lowC]) if np.any(mask_lowC) else np.nan
-
-    # ESL haute fréquence (médiane au-dessus high_L_min)
-    mask_highL = f >= max(high_L_min, srf if np.isfinite(srf) else 0)
-    ESL_hf = np.nanmedian(Ls[mask_highL]) if np.any(mask_highL) else np.nan
-
-    # ESR et tanD à une fréquence cible
-    def interp_at(x, y, x0):
-        if np.all(~np.isfinite(y)): return np.nan
-        try: return float(np.interp(x0, x[np.isfinite(y)], y[np.isfinite(y)]))
-        except: return np.nan
-
-    ESR_f0 = interp_at(f, Rs, target_freq)
-    tanD_f0 = interp_at(f, tanD, target_freq)
-    Q_f0 = 1.0/tanD_f0 if np.isfinite(tanD_f0) and tanD_f0>0 else np.nan
-
-    return {
-        "SRF_Hz": srf,
-        "Cp_lowF_F": Cp_lf,
-        "ESL_highF_H": ESL_hf,
-        "ESR_at_f0_Ohm": ESR_f0,
-        "tanD_at_f0": tanD_f0,
-        "Q_at_f0": Q_f0
-    }
-
-def figure_loglog(x, y, xlabel, ylabel, title, mask_pos=True):
-    x = np.asarray(x, float); y = np.asarray(y, float)
-    mask = np.isfinite(x) & np.isfinite(y) & (x>0)
-    if mask_pos: mask &= (y>0)
-    fig, ax = plt.subplots()
-    if np.any(mask): ax.loglog(x[mask], y[mask])
-    ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, which="both")
-    return fig
-
-def figure_semilogx(x, y, xlabel, ylabel, title):
-    x = np.asarray(x, float); y = np.asarray(y, float)
-    mask = np.isfinite(x) & np.isfinite(y) & (x>0)
-    fig, ax = plt.subplots()
-    if np.any(mask): ax.semilogx(x[mask], y[mask])
-    ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, which="both")
-    return fig
-
-def make_pdf_report(df, meta_text, metrics):
-    buf = io.BytesIO()
-    with PdfPages(buf) as pdf:
-        # Page 1 — Titre + méta + métriques
-        fig, ax = plt.subplots(figsize=(8.27, 11.69))  # A4 portrait
-        ax.axis("off")
-        lines = [
-            "S2P Analyzer Pro — Rapport de caractérisation",
-            "",
-            meta_text,
-            "",
-            "Métriques clés :",
-            f"• SRF (Self-Resonant Frequency) : {metrics['SRF_Hz']:.6g} Hz" if np.isfinite(metrics['SRF_Hz']) else "• SRF : N/A",
-            f"• Cp (basse fréquence) : {metrics['Cp_lowF_F']:.6g} F" if np.isfinite(metrics['Cp_lowF_F']) else "• Cp (basse fréquence) : N/A",
-            f"• ESL (haute fréquence) : {metrics['ESL_highF_H']:.6g} H" if np.isfinite(metrics['ESL_highF_H']) else "• ESL (haute fréquence) : N/A",
-            f"• ESR(f0) : {metrics['ESR_at_f0_Ohm']:.6g} Ω" if np.isfinite(metrics['ESR_at_f0_Ohm']) else "• ESR(f0) : N/A",
-            f"• tanδ(f0) : {metrics['tanD_at_f0']:.6g}" if np.isfinite(metrics['tanD_at_f0']) else "• tanδ(f0) : N/A",
-            f"• Q(f0)=1/tanδ : {metrics['Q_at_f0']:.6g}" if np.isfinite(metrics['Q_at_f0']) else "• Q(f0) : N/A",
-        ]
-        ax.text(0.05, 0.95, "\n".join(lines), va="top", fontsize=11)
-        pdf.savefig(fig); plt.close(fig)
-
-        f = df["freq_Hz"].values
-        pdf.savefig(figure_loglog(f, np.abs(df["Cp_F"].values), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp")); plt.close()
-        pdf.savefig(figure_semilogx(f, df["tanD"].values, "Fréquence (Hz)", "tanδ", "Facteur de pertes tanδ")); plt.close()
-        pdf.savefig(figure_loglog(f, np.clip(df["ESR_Ohm"].values.astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)")); plt.close()
-        pdf.savefig(figure_loglog(f, np.abs(df["ESL_H"].values.astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)")); plt.close()
-    buf.seek(0)
-    return buf
-
-# =========================
-# UI — Sidebar
-# =========================
-st.title("Analyse .s2p – Pro")
+# ---------- UI : Input ----------
+st.title("Analyse .s2p — Cp / tanδ / ESR / ESL")
 uploaded = st.file_uploader("Dépose ton fichier .s2p", type=["s2p"])
 
 with st.sidebar:
-    st.header("Prétraitement & Options")
-    fmin = st.number_input("fmin (Hz)", value=1.0, min_value=0.0, step=1.0, format="%.6f")
-    fmax = st.number_input("fmax (Hz)", value=1e11, min_value=0.0, step=1.0, format="%.6f")
-    decim = st.number_input("Décimation (1=no)", min_value=1, value=1, step=1)
-    st.caption("Décimer = garder 1 point sur N pour accélérer.")
+    st.header("Options d'analyse")
+    c1,c2 = st.columns(2)
+    f0_val = c1.number_input("Fréquence f₀", value=1.0, min_value=0.0, format="%.6f")
+    f0_unit = c2.selectbox("Unité f₀", list(SI_FREQ.keys()), index=3)  # Hz/kHz/MHz/GHz
+
+    s1,s2 = st.columns(2)
+    fmin_val = s1.number_input("fmin", value=1.0, min_value=0.0, format="%.6f")
+    fmin_unit = s2.selectbox("Unité fmin", list(SI_FREQ.keys()), index=0)
+    t1,t2 = st.columns(2)
+    fmax_val = t1.number_input("fmax", value=1e11, min_value=0.0, format="%.6f")
+    fmax_unit = t2.selectbox("Unité fmax", list(SI_FREQ.keys()), index=3)
+
+    decim = st.number_input("Décimation (1 = aucune)", min_value=1, value=1, step=1)
 
     st.markdown("---")
     st.subheader("Lissage (Savitzky–Golay)")
@@ -244,59 +139,135 @@ with st.sidebar:
     sg_poly = st.number_input("Ordre polynôme", min_value=1, value=2, step=1)
 
     st.markdown("---")
-    st.subheader("Métriques")
-    target_freq = st.number_input("Fréquence f0 (Hz)", value=1e9, format="%.6f")
-    low_cap_max = st.number_input("Bande Cp basse fréquence max (Hz)", value=1e6, format="%.6f")
-    high_L_min = st.number_input("Bande ESL min (Hz)", value=1e9, format="%.6f")
+    st.subheader("Unités d'affichage (KPIs)")
+    # sélecteurs d’unités pour chaque métrique
+    uC  = st.selectbox("Unité Cp", list(SI_CAP.keys()), index=4)     # pF par défaut
+    uL  = st.selectbox("Unité ESL", list(SI_IND.keys()), index=3)    # nH
+    uR  = st.selectbox("Unité ESR", list(SI_RES.keys()), index=0)    # ohm
+    uF0 = st.selectbox("Unité fréquence", list(SI_FREQ.keys()), index=3)  # GHz
 
-# =========================
-# Main logic
-# =========================
+# valeurs en SI
+f0  = f0_val*SI_FREQ[f0_unit]
+fmin= fmin_val*SI_FREQ[fmin_unit]
+fmax= fmax_val*SI_FREQ[fmax_unit]
+
+# ---------- Main ----------
 if uploaded:
     try:
         freqs, S11, S21, S12, S22, Z0, fmt, funit = parse_touchstone_s2p(uploaded)
         df, Zin, Yin = compute_params_from_s11(freqs, S11, Z0)
-        meta = f"Z0={Z0:.2f} Ω | Format={fmt} | Unité={funit} | N={len(df)}"
+        meta = f"Z0={Z0:.2f} Ω | Format={fmt} | Unité entête={funit} | Points={len(df)}"
         st.success(meta)
 
-        # Bande + décimation
-        df = apply_band_and_decimate(df, fmin, fmax, int(decim))
-
-        # Lissage optionnel
+        # bande + décimation + lissage
+        df = band_decimate(df, fmin, fmax, int(decim))
         if use_sg:
-            for col in ["Cp_F", "tanD", "ESR_Ohm", "ESL_H"]:
-                y = df[col].values.astype(float)
-                df[col] = apply_savgol(y, sg_win, sg_poly)
+            for col in ["Cp_F","tanD","ESR_Ohm","ESL_H"]:
+                df[col] = savgol_opt(df[col].values.astype(float), sg_win, sg_poly)
 
-        # Tableau
+        # -------- KPIs @ f0 --------
+        Cp_f0   = interp_at(df["freq_Hz"], df["Cp_F"], f0)
+        ESR_f0  = interp_at(df["freq_Hz"], df["ESR_Ohm"], f0)
+        ESL_f0  = interp_at(df["freq_Hz"], df["ESL_H"], f0)
+        tanD_f0 = interp_at(df["freq_Hz"], df["tanD"], f0)
+        Q_f0    = (1.0/tanD_f0) if np.isfinite(tanD_f0) and tanD_f0>0 else np.nan
+
+        # Alerte tanδ si hors régime capacitif "sain"
+        if np.isfinite(tanD_f0) and tanD_f0>1:
+            st.warning("tanδ@f₀ > 1 → Q très faible. Vérifie le régime (inductif/au voisinage de SRF) ou le de-embedding.")
+
+        # Conversion unités pour affichage
+        Cp_disp  = to_unit(Cp_f0, SI_CAP[uC])
+        ESL_disp = to_unit(ESL_f0, SI_IND[uL])
+        ESR_disp = to_unit(ESR_f0, SI_RES[uR])
+        f0_disp  = to_unit(f0, SI_FREQ[uF0])
+
+        # -------- Cartes KPIs --------
+        st.write(" ")
+        k1,k2,k3 = st.columns(3)
+        with k1:
+            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-title">Fréquence f₀ ({uF0})</div><div class="kpi-value">{fmt(f0_disp)}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-title">ESR @ f₀ ('+uR+')</div><div class="kpi-value">'+fmt(ESR_disp)+'</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        with k2:
+            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-title">Cp @ f₀ ({uC})</div><div class="kpi-value">{fmt(Cp_disp)}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-title">tanδ @ f₀ (—)</div><div class="kpi-value">'+fmt(tanD_f0)+'</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        with k3:
+            st.markdown('<div class="kpi-card">', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-title">ESL @ f₀ ({uL})</div><div class="kpi-value">{fmt(ESL_disp)}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-title">Q @ f₀ (—)</div><div class="kpi-value">'+fmt(Q_f0)+'</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("—")
+
+        # -------- Table --------
+        st.subheader("Aperçu des données")
         st.dataframe(df.head(500), use_container_width=True)
 
-        # Graphes (2 colonnes)
-        c1, c2 = st.columns(2)
+        # -------- Graphes --------
+        def fig_loglog(x, y, xlabel, ylabel, title, positive_y=True):
+            x = np.asarray(x,float); y = np.asarray(y,float)
+            m = np.isfinite(x) & np.isfinite(y) & (x>0)
+            if positive_y: m &= (y>0)
+            fig, ax = plt.subplots()
+            if np.any(m): ax.loglog(x[m], y[m])
+            ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, which="both")
+            return fig
+
+        def fig_semilogx(x, y, xlabel, ylabel, title):
+            x = np.asarray(x,float); y = np.asarray(y,float)
+            m = np.isfinite(x) & np.isfinite(y) & (x>0)
+            fig, ax = plt.subplots()
+            if np.any(m): ax.semilogx(x[m], y[m])
+            ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, which="both")
+            return fig
+
+        c1,c2 = st.columns(2)
         with c1:
-            st.pyplot(figure_loglog(df["freq_Hz"], np.abs(df["Cp_F"]), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp"))
-            st.pyplot(figure_loglog(df["freq_Hz"], np.clip(df["ESR_Ohm"].astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)"))
+            st.pyplot(fig_loglog(df["freq_Hz"], np.abs(df["Cp_F"]), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp"))
+            st.pyplot(fig_loglog(df["freq_Hz"], np.clip(df["ESR_Ohm"].astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)"))
         with c2:
-            st.pyplot(figure_semilogx(df["freq_Hz"], df["tanD"], "Fréquence (Hz)", "tanδ", "Facteur de pertes tanδ"))
-            st.pyplot(figure_loglog(df["freq_Hz"], np.abs(df["ESL_H"].astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)"))
+            st.pyplot(fig_semilogx(df["freq_Hz"], df["tanD"], "Fréquence (Hz)", "tanδ (—)", "Facteur de pertes tanδ"))
+            st.pyplot(fig_loglog(df["freq_Hz"], np.abs(df["ESL_H"].astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)"))
 
-        # Métriques comme un prof de carac
-        metrics = estimate_metrics(df, target_freq, low_cap_max, high_L_min)
-        colm = st.columns(3)
-        colm[0].metric("SRF (Hz)", f"{metrics['SRF_Hz']:.6g}" if np.isfinite(metrics['SRF_Hz']) else "N/A")
-        colm[1].metric("Cp basse fréquence (F)", f"{metrics['Cp_lowF_F']:.6g}" if np.isfinite(metrics['Cp_lowF_F']) else "N/A")
-        colm[2].metric("ESL haute fréquence (H)", f"{metrics['ESL_highF_H']:.6g}" if np.isfinite(metrics['ESL_highF_H']) else "N/A")
-        colm2 = st.columns(3)
-        colm2[0].metric("ESR @ f0 (Ω)", f"{metrics['ESR_at_f0_Ohm']:.6g}" if np.isfinite(metrics['ESR_at_f0_Ohm']) else "N/A")
-        colm2[1].metric("tanδ @ f0", f"{metrics['tanD_at_f0']:.6g}" if np.isfinite(metrics['tanD_at_f0']) else "N/A")
-        colm2[2].metric("Q @ f0", f"{metrics['Q_at_f0']:.6g}" if np.isfinite(metrics['Q_at_f0']) else "N/A")
-
-        # Exports
+        # -------- Exports --------
         csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("Télécharger CSV", csv, "analysis_s2p_pro.csv", "text/csv")
+        st.download_button("Télécharger CSV", csv, "analysis_s2p.csv", "text/csv")
 
-        pdf_buf = make_pdf_report(df, meta, metrics)
-        st.download_button("Télécharger rapport PDF", data=pdf_buf, file_name="rapport_s2p_pro.pdf", mime="application/pdf")
+        # PDF avec unités choisies & KPIs @ f0
+        def make_pdf(df, meta):
+            buf = io.BytesIO()
+            with PdfPages(buf) as pdf:
+                # Page 1
+                fig, ax = plt.subplots(figsize=(8.27, 11.69))
+                ax.axis("off")
+                lines = [
+                    "Rapport d'analyse .s2p",
+                    "",
+                    meta,
+                    "",
+                    f"f₀ = {fmt(f0_disp)} {uF0}",
+                    f"ESR(f₀) = {fmt(ESR_disp)} {uR}",
+                    f"Cp(f₀) = {fmt(Cp_disp)} {uC}",
+                    f"ESL(f₀) = {fmt(ESL_disp)} {uL}",
+                    f"tanδ(f₀) = {fmt(tanD_f0)} (—)",
+                    f"Q(f₀) = {fmt(Q_f0)} (—)",
+                ]
+                ax.text(0.05, 0.95, "\n".join(lines), va="top", fontsize=11)
+                pdf.savefig(fig); plt.close(fig)
+                # Pages graphes
+                f = df["freq_Hz"].values
+                pdf.savefig(fig_loglog(f, np.abs(df["Cp_F"].values), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp")); plt.close()
+                pdf.savefig(fig_semilogx(f, df["tanD"].values, "Fréquence (Hz)", "tanδ (—)", "Facteur de pertes tanδ")); plt.close()
+                pdf.savefig(fig_loglog(f, np.clip(df["ESR_Ohm"].values.astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)")); plt.close()
+                pdf.savefig(fig_loglog(f, np.abs(df["ESL_H"].values.astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)")); plt.close()
+            buf.seek(0); return buf
+
+        pdf_buf = make_pdf(df, meta)
+        st.download_button("Télécharger rapport PDF", data=pdf_buf, file_name="rapport_s2p.pdf", mime="application/pdf")
 
     except Exception as e:
         st.error(f"Erreur : {e}")
