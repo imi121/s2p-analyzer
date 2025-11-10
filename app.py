@@ -1,5 +1,6 @@
 # app.py — Analyse .s2p : Cp / tanδ / ESR / ESL
-# Refactor complet : UI premium (sans emojis) + SRF + lissage + exports
+# Refactor: SRF on RAW + smoothing only for PLOTS (Re/Im{Z}) on a uniform log-f grid
+# Exports (CSV/PDF) use RAW data. KPIs use RAW data. UI premium preserved.
 
 import re, math, cmath, io
 import numpy as np
@@ -16,6 +17,7 @@ st.set_page_config(
     layout="wide"
 )
 
+# ---- Styles (unchanged) ----
 st.markdown("""
 <style>
 :root{
@@ -24,16 +26,13 @@ st.markdown("""
   --bg:#F5F7FB; --card:rgba(255,255,255,.82); --muted:#6B7280; --ink:#0B1220;
   --ring: rgba(79,70,229,.35);
 }
-
 @media (prefers-color-scheme: dark) {
   :root{
     --bg:#0B1220; --card:rgba(17,24,39,.72); --muted:#9CA3AF; --ink:#F3F4F6;
   }
 }
-
 html, body, .main { background: var(--bg); }
 .main .block-container { padding-top: .9rem; padding-bottom: 2rem; max-width: 1200px; }
-
 .hero{
   background: radial-gradient(1200px 400px at 0% 0%, rgba(79,70,229,.30), transparent 60%),
               linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #334155 100%);
@@ -43,7 +42,6 @@ html, body, .main { background: var(--bg); }
 }
 .hero h1{margin: 0; letter-spacing:.2px; font-weight:800;}
 .hero p{opacity:.9; margin:.35rem 0 0;}
-
 .badges{display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.8rem}
 .badge{
   background: rgba(255,255,255,.10);
@@ -51,7 +49,6 @@ html, body, .main { background: var(--bg); }
   padding: 6px 10px; border-radius: 999px; font-size:.86rem;
   display:flex; gap:.45rem; align-items:center;
 }
-
 .kpi-grid{display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:16px;}
 .kpi-card{
   backdrop-filter: blur(10px) saturate(1.15);
@@ -66,11 +63,9 @@ html, body, .main { background: var(--bg); }
 .kpi-value{font-size:2.0rem; font-weight:800; color:var(--ink); letter-spacing:.2px; line-height:1.05;}
 .kpi-unit{font-size:1.1rem; font-weight:600; opacity:.7; margin-left:.25rem}
 .kpi-sub{font-size:.82rem; color:var(--muted); margin-top:4px}
-
 .sep{border:none; border-top:1px solid rgba(0,0,0,.07); margin:18px 0}
 [data-baseweb="tab-list"]{gap:.4rem}
 footer{visibility:hidden;}
-
 .stDownloadButton button{
   border-radius:10px; border:1px solid rgba(0,0,0,.08);
   box-shadow: 0 6px 18px rgba(0,0,0,.06);
@@ -96,164 +91,45 @@ st.markdown("""
   --border: rgba(255,255,255,0.08);
   --shadow: 0 12px 40px rgba(0,0,0,0.45);
 }
-
-/* Page globale */
 html, body, [class*="css"]  {
   background: radial-gradient(circle at 30% 30%, rgba(79,70,229,0.15) 0%, transparent 70%), 
               linear-gradient(160deg, #0d1117 0%, #111827 80%);
   color: var(--text-main);
   font-family: 'Inter', sans-serif;
 }
-
-/* Conteneur principal */
-.main .block-container {
-  background: transparent;
-  max-width: 1200px;
-  padding-top: 1rem;
-}
-
-/* Hero section */
-.hero {
-  background: linear-gradient(135deg, rgba(63,63,214,0.7) 0%, rgba(25,28,56,0.9) 100%);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 28px 32px;
-  box-shadow: var(--shadow);
-  color: var(--text-main);
-}
-.hero h1 {
-  font-size: 1.8rem;
-  font-weight: 800;
-  letter-spacing: .3px;
-  color: #fff;
-}
-.hero p {
-  opacity: 0.9;
-  font-size: 1rem;
-}
-.badge {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.1);
-  padding: 6px 10px;
-  border-radius: 999px;
-  color: var(--text-main);
-}
-
-/* KPI Cards */
-.kpi-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  backdrop-filter: var(--glass);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-  padding: 20px 22px;
-  transition: all 0.25s ease;
-}
-.kpi-card:hover {
-  border-color: var(--primary-light);
-  transform: translateY(-2px);
-}
-.kpi-title {
-  color: var(--text-muted);
-  font-size: 0.9rem;
-  margin-bottom: 6px;
-}
-.kpi-value {
-  color: #f3f4f6;
-  font-size: 2.2rem;
-  font-weight: 800;
-}
-.kpi-unit {
-  color: var(--cyan);
-  font-size: 1.2rem;
-  margin-left: .3rem;
-}
-.kpi-sub {
-  color: var(--text-muted);
-  font-size: 0.8rem;
-  margin-top: 5px;
-}
-
-/* Sliders */
-.stSlider > div[data-baseweb="slider"] {
-  background: rgba(255,255,255,0.08);
-  border-radius: 10px;
-}
-.stSlider > div[data-baseweb="slider"] div[role="slider"] {
-  background-color: var(--primary);
-  box-shadow: 0 0 0 6px rgba(79,70,229,0.35);
-}
-
-/* Boutons */
+.main .block-container { background: transparent; max-width: 1200px; padding-top: 1rem; }
+.hero { background: linear-gradient(135deg, rgba(63,63,214,0.7) 0%, rgba(25,28,56,0.9) 100%);
+  border: 1px solid var(--border); border-radius: 20px; padding: 28px 32px; box-shadow: var(--shadow); color: var(--text-main);}
+.hero h1 { font-size: 1.8rem; font-weight: 800; letter-spacing: .3px; color: #fff;}
+.hero p { opacity: 0.9; font-size: 1rem;}
+.badge { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); padding: 6px 10px; border-radius: 999px; color: var(--text-main); }
+.kpi-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 18px; backdrop-filter: var(--glass);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35); padding: 20px 22px; transition: all 0.25s ease;}
+.kpi-card:hover { border-color: var(--primary-light); transform: translateY(-2px); }
+.kpi-title { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 6px;}
+.kpi-value { color: #f3f4f6; font-size: 2.2rem; font-weight: 800;}
+.kpi-unit { color: var(--cyan); font-size: 1.2rem; margin-left: .3rem;}
+.kpi-sub { color: var(--text-muted); font-size: 0.8rem; margin-top: 5px;}
+.stSlider > div[data-baseweb="slider"] { background: rgba(255,255,255,0.08); border-radius: 10px; }
+.stSlider > div[data-baseweb="slider"] div[role="slider"] { background-color: var(--primary); box-shadow: 0 0 0 6px rgba(79,70,229,0.35); }
 .stButton > button, .stDownloadButton > button {
-  background: linear-gradient(135deg, var(--accent), var(--cyan));
-  color: white !important;
-  border: none;
-  border-radius: 10px;
-  font-weight: 600;
-  box-shadow: 0 6px 25px rgba(79,70,229,0.4);
-  transition: all 0.3s ease;
-}
-.stButton > button:hover, .stDownloadButton > button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 28px rgba(79,70,229,0.55);
-}
-
-/* Tabs */
-[data-baseweb="tab-list"] {
-  background: var(--bg-panel);
-  border-radius: 12px;
-  border: 1px solid var(--border);
-}
-[data-baseweb="tab"] {
-  color: var(--text-muted);
-}
-[data-baseweb="tab"][aria-selected="true"] {
-  background: linear-gradient(135deg, var(--primary), var(--cyan));
-  color: white !important;
-}
-
-/* Table */
-[data-testid="stDataFrame"] {
-  background: var(--bg-panel);
-  color: var(--text-main);
-  border-radius: 12px;
-}
-
-/* Separator */
-.sep {
-  border: none;
-  border-top: 1px solid rgba(255,255,255,0.08);
-  margin: 25px 0;
-}
-
-/* Sidebar */
-section[data-testid="stSidebar"] {
-  background: linear-gradient(160deg, #0f172a 0%, #1e293b 100%);
-  border-right: 1px solid rgba(255,255,255,0.05);
-  color: var(--text-main);
-}
-section[data-testid="stSidebar"] h1, 
-section[data-testid="stSidebar"] h2, 
-section[data-testid="stSidebar"] label {
-  color: var(--text-main);
-}
-
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 10px;
-}
-::-webkit-scrollbar-thumb {
-  background: linear-gradient(var(--primary), var(--cyan));
-  border-radius: 10px;
-}
+  background: linear-gradient(135deg, var(--accent), var(--cyan)); color: white !important; border: none; border-radius: 10px;
+  font-weight: 600; box-shadow: 0 6px 25px rgba(79,70,229,0.4); transition: all 0.3s ease;}
+.stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(79,70,229,0.55); }
+[data-baseweb="tab-list"] { background: var(--bg-panel); border-radius: 12px; border: 1px solid var(--border); }
+[data-baseweb="tab"] { color: var(--text-muted); }
+[data-baseweb="tab"][aria-selected="true"] { background: linear-gradient(135deg, var(--primary), var(--cyan)); color: white !important; }
+[data-testid="stDataFrame"] { background: var(--bg-panel); color: var(--text-main); border-radius: 12px; }
+.sep { border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 25px 0; }
+section[data-testid="stSidebar"] { background: linear-gradient(160deg, #0f172a 0%, #1e293b 100%); border-right: 1px solid rgba(255,255,255,0.05); color: var(--text-main);}
+section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] label { color: var(--text-main); }
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-thumb { background: linear-gradient(var(--primary), var(--cyan)); border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
-
-# ================== ICONES (SVG inline) ==================
+# ================== ICONS & KPI ==================
 def svg_icon(name:str)->str:
-    # Icônes minimalistes (Lucide-like) en paths
     icons = {
         "freq": '<path d="M4 12h3l2 6 4-12 2 6h5" />',
         "esr":  '<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /><path d="M19.4 15a1.6 1.6 0 0 0 .33 1.8l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.6 1.6 0 0 0 15 19.4 1.6 1.6 0 0 0 14 20.9a2 2 0 1 1-4 0 1.6 1.6 0 0 0-1-1.5A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8-.33 2 2 0 1 1-2.83-2.83A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-.6-1 1.6 1.6 0 0 0-1.8-.33 2 2 0 1 1 0-3.37 1.6 1.6 0 0 0 1-.33A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0 .33-1.82 2 2 0 1 1 2.83-2.83A1.6 1.6 0 0 0 9 4.6c.31-.12.65-.12.96 0A1.6 1.6 0 0 0 11 4.6a1.6 1.6 0 0 0 .33-1.82 2 2 0 1 1 3.37 0A1.6 1.6 0 0 0 15 4.6a1.6 1.6 0 0 0 1.82.33 2 2 0 1 1 2.83 2.83A1.6 1.6 0 0 0 19.4 9c.12.31.12.65 0 .96.12.31.12.65 0 .96Z"/>',
@@ -384,7 +260,7 @@ def interp_at(f, y, f0):
     return float(np.interp(f0, f[mask], y[mask]))
 
 def estimate_srf(freqs, Xs):
-    """SRF ~ fréquence où Im{Zin}=0."""
+    """SRF ~ fréquence où Im{Zin}=0 (premier crossing, RAW ONLY)."""
     f = np.asarray(freqs,float); x = np.asarray(Xs,float)
     m = np.isfinite(f) & np.isfinite(x)
     f, x = f[m], x[m]
@@ -397,6 +273,39 @@ def estimate_srf(freqs, Xs):
     if (x2-x1)==0: return float(f1)
     return float(f1 - x1*(f2-f1)/(x2-x1))
 
+# --- NEW: smoothing on a uniform log-frequency grid, Re/Im{Z} only (for plots) ---
+def smooth_impedance_for_plot(freqs, Zin, use_sg, win, poly):
+    """
+    Returns smoothed Zin for plotting ONLY.
+    - Build uniform log10(f) grid
+    - Interpolate Re(Zin), Im(Zin) to grid
+    - Savitzky–Golay on grid
+    - Interpolate back to original log points
+    """
+    f = np.asarray(freqs, float)
+    ReZ = np.real(Zin).astype(float)
+    ImZ = np.imag(Zin).astype(float)
+
+    if (not use_sg) or (len(f) < 5):
+        return ReZ + 1j*ImZ
+
+    logf = np.log10(f)
+    logf_grid = np.linspace(logf.min(), logf.max(), len(f))
+
+    # interpolate to uniform log grid
+    Re_grid = np.interp(logf_grid, logf, ReZ)
+    Im_grid = np.interp(logf_grid, logf, ImZ)
+
+    # SG on grid
+    Re_grid_s = savgol_opt(Re_grid, win, poly)
+    Im_grid_s = savgol_opt(Im_grid, win, poly)
+
+    # map back to original points
+    ReZ_s = np.interp(logf, logf_grid, Re_grid_s)
+    ImZ_s = np.interp(logf, logf_grid, Im_grid_s)
+
+    return ReZ_s + 1j*ImZ_s
+
 # ================== HEADER ==================
 st.markdown("""
 <div class="hero">
@@ -405,8 +314,8 @@ st.markdown("""
   <div class="badges">
     <div class="badge">Série / Parallèle</div>
     <div class="badge">Export CSV & PDF</div>
-    <div class="badge">Lissage Savitzky–Golay</div>
-    <div class="badge">Détection SRF</div>
+    <div class="badge">Lissage Savitzky–Golay (plots)</div>
+    <div class="badge">Détection SRF (données brutes)</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -431,8 +340,8 @@ with st.sidebar:
     decim = st.number_input("Décimation (1 = aucune)", min_value=1, value=1, step=1)
 
     st.markdown("---")
-    st.subheader("Lissage (Savitzky–Golay)")
-    use_sg = st.checkbox("Activer le lissage", value=False)
+    st.subheader("Lissage (Savitzky–Golay) — uniquement pour l'affichage")
+    use_sg = st.checkbox("Activer le lissage (plots)", value=False)
     sg_win = st.number_input("Fenêtre (impair)", min_value=3, value=9, step=2)
     sg_poly = st.number_input("Ordre polynôme", min_value=1, value=2, step=1)
 
@@ -451,23 +360,25 @@ fmax = fmax_val*SI_FREQ[fmax_unit]
 # ================== MAIN ==================
 if uploaded:
     try:
+        # --- Parse + RAW compute ---
         freqs, S11, S21, S12, S22, Z0, data_fmt, funit = parse_touchstone_s2p(uploaded)
-        df, Zin, Yin = compute_params_from_s11(freqs, S11, Z0)
-        meta = f"Z0={Z0:.2f} Ω | Format={data_fmt} | Unité entête={funit} | Points={len(df)}"
+        raw_df_full, Zin_full, Yin_full = compute_params_from_s11(freqs, S11, Z0)
+        meta = f"Z0={Z0:.2f} Ω | Format={data_fmt} | Unité entête={funit} | Points={len(raw_df_full)}"
         st.success(meta)
 
-        # Bande + décimation + lissage
-        df = band_decimate(df, fmin, fmax, int(decim))
-        if use_sg:
-            for col in ["Cp_F","tanD","ESR_Ohm","ESL_H","Xs_Ohm"]:
-                df[col] = savgol_opt(df[col].values.astype(float), sg_win, sg_poly)
+        # --- Band selection + decimation on RAW ---
+        raw_df = band_decimate(raw_df_full, fmin, fmax, int(decim))
+        # Align Zin over same indices
+        idx = raw_df.index
+        freqs_b = raw_df["freq_Hz"].values
+        Zin_b   = np.asarray(Zin_full)[idx]
 
-        # SRF
-        srf_freq = estimate_srf(df["freq_Hz"], df["Xs_Ohm"])
+        # --- SRF from RAW only ---
+        srf_freq = estimate_srf(raw_df["freq_Hz"], raw_df["Xs_Ohm"])
 
-        # Slider f0 dans la bande
-        if len(df) >= 2:
-            fmin_b, fmax_b = float(df["freq_Hz"].min()), float(df["freq_Hz"].max())
+        # --- Slider f0 within loaded band ---
+        if len(raw_df) >= 2:
+            fmin_b, fmax_b = float(raw_df["freq_Hz"].min()), float(raw_df["freq_Hz"].max())
             st.slider("Ajuste f₀ (dans la bande chargée)",
                       min_value=fmin_b, max_value=fmax_b,
                       value=float(np.clip(f0, fmin_b, fmax_b)),
@@ -475,20 +386,20 @@ if uploaded:
                       key="f0_slider")
             f0 = st.session_state.get("f0_slider", f0)
 
-        # KPIs @ f0
-        Cp_f0   = interp_at(df["freq_Hz"], df["Cp_F"],    f0)
-        ESR_f0  = interp_at(df["freq_Hz"], df["ESR_Ohm"], f0)
-        ESL_f0  = interp_at(df["freq_Hz"], df["ESL_H"],   f0)
-        tanD_f0 = interp_at(df["freq_Hz"], df["tanD"],    f0)
+        # --- KPIs from RAW (interpolate on raw_df) ---
+        Cp_f0   = interp_at(raw_df["freq_Hz"], raw_df["Cp_F"],    f0)
+        ESR_f0  = interp_at(raw_df["freq_Hz"], raw_df["ESR_Ohm"], f0)
+        ESL_f0  = interp_at(raw_df["freq_Hz"], raw_df["ESL_H"],   f0)
+        tanD_f0 = interp_at(raw_df["freq_Hz"], raw_df["tanD"],    f0)
         Q_f0    = (1.0/tanD_f0) if np.isfinite(tanD_f0) and tanD_f0>0 else np.nan
 
         if np.isfinite(tanD_f0) and tanD_f0>1:
             st.warning("tanδ@f₀ > 1 → Q très faible. Proximité SRF / régime inductif ou besoin de dé-embedding.")
 
-        if (f0<df["freq_Hz"].min()) or (f0>df["freq_Hz"].max()):
+        if (f0<raw_df["freq_Hz"].min()) or (f0>raw_df["freq_Hz"].max()):
             st.info("f₀ est hors de la bande affichée → interpolation impossible dans cette bande.")
 
-        # Conversions pour affichage
+        # --- Display conversions for KPIs ---
         Cp_disp  = to_unit(Cp_f0,  SI_CAP[uC])
         ESL_disp = to_unit(ESL_f0, SI_IND[uL])
         ESR_disp = to_unit(ESR_f0, SI_RES[uR])
@@ -498,29 +409,25 @@ if uploaded:
         # ================== KPI CARDS ==================
         st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
-
         with col1:
             kpi_card(f"Fréquence f₀ ({uF0})", fmt_num(f0_disp), unit=uF0,
-                     sub="Référence pour l’interpolation", icon="freq")
+                     sub="Référence pour l’interpolation (RAW)", icon="freq")
             kpi_card(f"ESR @ f₀ ({uR})", fmt_num(ESR_disp), unit=uR,
-                     sub="Résistance série équivalente", icon="esr")
-
+                     sub="Résistance série équivalente (RAW)", icon="esr")
         with col2:
             kpi_card(f"Cp @ f₀ ({uC})", fmt_num(Cp_disp), unit=uC,
-                     sub="Capacitance parallèle (B/ω)", icon="cp")
+                     sub="Capacitance parallèle (RAW)", icon="cp")
             kpi_card("tanδ @ f₀ (—)", fmt_num(tanD_f0), unit="",
-                     sub="tanδ = G/|B| ; Q = 1/tanδ", icon="tan")
-
+                     sub="tanδ = G/|B| ; Q = 1/tanδ (RAW)", icon="tan")
         with col3:
             kpi_card(f"ESL @ f₀ ({uL})", fmt_num(ESL_disp), unit=uL,
-                     sub="Inductance série équivalente (X>0)", icon="esl")
+                     sub="Inductance série équivalente (RAW)", icon="esl")
             kpi_card("SRF estimée", "N/A" if not np.isfinite(srf_freq) else fmt_num(srf_disp), unit=uF0 if np.isfinite(srf_freq) else "",
-                     sub="Croisement Im{Zin} = 0", icon="bolt")
-
+                     sub="Croisement Im{Zin} = 0 (RAW)", icon="bolt")
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('<hr class="sep">', unsafe_allow_html=True)
 
-        # ================== GAUGES (Plotly minimalistes) ==================
+        # ================== GAUGES (Plotly, values from RAW) ==================
         def gauge(value, title, suffix="", vmax=None):
             if not np.isfinite(value): value, vmax = 0, 1
             if vmax is None: vmax = 10**np.ceil(np.log10(abs(value)+1e-30))
@@ -541,6 +448,26 @@ if uploaded:
         with g3: st.plotly_chart(gauge(ESL_disp or 0, f"ESL @ f₀ ({uL})", suffix=uL), use_container_width=True, config={"displayModeBar": False})
 
         st.markdown('<hr class="sep">', unsafe_allow_html=True)
+
+        # ================== Build PLOTTING dataframe (smoothed Zin) ==================
+        # Smooth Re/Im{Z} on uniform log-f grid, then recompute plotting quantities
+        Zin_plot = smooth_impedance_for_plot(freqs_b, Zin_b, use_sg, sg_win, sg_poly)
+        w_b = 2*np.pi*freqs_b
+        Yin_plot = 1.0 / Zin_plot
+        Gp, Bp  = np.real(Yin_plot), np.imag(Yin_plot)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            Cp_plot   = np.where(w_b!=0, Bp/w_b, np.nan)
+            tanD_plot = np.where(Bp!=0, Gp/np.abs(Bp), np.nan)
+            ESR_plot  = np.real(Zin_plot)
+            ESL_plot  = np.where(np.imag(Zin_plot)>0, np.imag(Zin_plot)/w_b, np.nan)
+            Xs_plot   = np.imag(Zin_plot)
+
+        plot_df = pd.DataFrame({
+            "freq_Hz": freqs_b,
+            "Cp_F": Cp_plot, "tanD": tanD_plot,
+            "ESR_Ohm": ESR_plot, "ESL_H": ESL_plot,
+            "Xs_Ohm": Xs_plot
+        })
 
         # ================== TABS : COURBES / DONNÉES / EXPORT ==================
         tab1, tab2, tab3 = st.tabs(["Courbes", "Données", "Export"])
@@ -577,23 +504,25 @@ if uploaded:
 
             c1,c2 = st.columns(2)
             with c1:
-                st.pyplot(fig_loglog(df["freq_Hz"], np.abs(df["Cp_F"]), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp", markers=markers))
-                st.pyplot(fig_loglog(df["freq_Hz"], np.clip(df["ESR_Ohm"].astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)", markers=markers))
+                st.pyplot(fig_loglog(plot_df["freq_Hz"], np.abs(plot_df["Cp_F"]), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp", markers=markers))
+                st.pyplot(fig_loglog(plot_df["freq_Hz"], np.clip(plot_df["ESR_Ohm"].astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)", markers=markers))
             with c2:
-                st.pyplot(fig_semilogx(df["freq_Hz"], df["tanD"], "Fréquence (Hz)", "tanδ (—)", "Facteur de pertes tanδ", markers=markers))
-                st.pyplot(fig_loglog(df["freq_Hz"], np.abs(df["ESL_H"].astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)", markers=markers))
+                st.pyplot(fig_semilogx(plot_df["freq_Hz"], plot_df["tanD"], "Fréquence (Hz)", "tanδ (—)", "Facteur de pertes tanδ", markers=markers))
+                st.pyplot(fig_loglog(plot_df["freq_Hz"], np.abs(plot_df["ESL_H"].astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)", markers=markers))
 
         with tab2:
-            st.dataframe(df, use_container_width=True)
+            st.subheader("Données (RAW, utilisées pour KPIs/SRF/Exports)")
+            st.dataframe(raw_df, use_container_width=True)
 
         with tab3:
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("Télécharger CSV", csv, "analysis_s2p.csv", "text/csv")
+            # CSV from RAW
+            csv = raw_df.to_csv(index=False).encode("utf-8")
+            st.download_button("Télécharger CSV (RAW)", csv, "analysis_s2p_raw.csv", "text/csv")
 
-            def make_pdf(df, meta):
+            def make_pdf(raw_df, plot_df, meta):
                 buf = io.BytesIO()
                 with PdfPages(buf) as pdf:
-                    # Page 1 — résumé
+                    # Page 1 — résumé (RAW KPIs)
                     fig, ax = plt.subplots(figsize=(8.27, 11.69))  # A4 portrait
                     ax.axis("off")
                     title = "Rapport d'analyse .s2p"
@@ -601,25 +530,26 @@ if uploaded:
                     lines = [
                         meta, "",
                         f"f₀ = {fmt_num(to_unit(f0, SI_FREQ[uF0]))} {uF0}",
-                        f"ESR(f₀) = {fmt_num(ESR_disp)} {uR}",
-                        f"Cp(f₀) = {fmt_num(Cp_disp)} {uC}",
-                        f"ESL(f₀) = {fmt_num(ESL_disp)} {uL}",
-                        f"tanδ(f₀) = {fmt_num(tanD_f0)} (—)",
-                        f"Q(f₀) = {fmt_num(Q_f0)} (—)",
-                        f"SRF ≈ {fmt_num(srf_disp)} {uF0}",
+                        f"ESR(f₀) = {fmt_num(to_unit(interp_at(raw_df['freq_Hz'], raw_df['ESR_Ohm'], f0), SI_RES[uR]))} {uR}",
+                        f"Cp(f₀) = {fmt_num(to_unit(interp_at(raw_df['freq_Hz'], raw_df['Cp_F'], f0), SI_CAP[uC]))} {uC}",
+                        f"ESL(f₀) = {fmt_num(to_unit(interp_at(raw_df['freq_Hz'], raw_df['ESL_H'], f0), SI_IND[uL]))} {uL}",
+                        f"tanδ(f₀) = {fmt_num(interp_at(raw_df['freq_Hz'], raw_df['tanD'], f0))} (—)",
+                        f"Q(f₀) = {fmt_num((1.0/interp_at(raw_df['freq_Hz'], raw_df['tanD'], f0)) if np.isfinite(interp_at(raw_df['freq_Hz'], raw_df['tanD'], f0)) and interp_at(raw_df['freq_Hz'], raw_df['tanD'], f0)>0 else np.nan)} (—)",
+                        f"SRF ≈ {fmt_num(to_unit(estimate_srf(raw_df['freq_Hz'], raw_df['Xs_Ohm']), SI_FREQ[uF0]))} {uF0}",
                     ]
                     ax.text(0.05, 0.90, "\n".join(lines), va="top", fontsize=11)
                     pdf.savefig(fig); plt.close(fig)
 
-                    # Pages graphes
-                    f = df["freq_Hz"].values
+                    # Pages graphes (from PLOT DF)
+                    f = plot_df["freq_Hz"].values
                     def fig_loglog_simple(x, y, xlabel, ylabel, title):
                         fig, ax = plt.subplots()
                         m = np.isfinite(x) & np.isfinite(y) & (x>0) & (y>0)
                         if np.any(m): ax.loglog(x[m], y[m])
                         if np.isfinite(f0): ax.axvline(f0, linestyle="--", alpha=0.5, label="f₀")
-                        if np.isfinite(srf_freq): ax.axvline(srf_freq, linestyle="--", alpha=0.5, label="SRF")
-                        if np.isfinite(f0) or np.isfinite(srf_freq): ax.legend()
+                        srff = estimate_srf(raw_df["freq_Hz"], raw_df["Xs_Ohm"])
+                        if np.isfinite(srff): ax.axvline(srff, linestyle="--", alpha=0.5, label="SRF")
+                        if np.isfinite(f0) or np.isfinite(srff): ax.legend()
                         ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, which="both")
                         return fig
                     def fig_semilogx_simple(x, y, xlabel, ylabel, title):
@@ -627,19 +557,20 @@ if uploaded:
                         m = np.isfinite(x) & np.isfinite(y) & (x>0)
                         if np.any(m): ax.semilogx(x[m], y[m])
                         if np.isfinite(f0): ax.axvline(f0, linestyle="--", alpha=0.5, label="f₀")
-                        if np.isfinite(srf_freq): ax.axvline(srf_freq, linestyle="--", alpha=0.5, label="SRF")
-                        if np.isfinite(f0) or np.isfinite(srf_freq): ax.legend()
+                        srff = estimate_srf(raw_df["freq_Hz"], raw_df["Xs_Ohm"])
+                        if np.isfinite(srff): ax.axvline(srff, linestyle="--", alpha=0.5, label="SRF")
+                        if np.isfinite(f0) or np.isfinite(srff): ax.legend()
                         ax.set_xlabel(xlabel); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, which="both")
                         return fig
 
-                    pdf.savefig(fig_loglog_simple(f, np.abs(df["Cp_F"].values), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp")); plt.close()
-                    pdf.savefig(fig_semilogx_simple(f, df["tanD"].values, "Fréquence (Hz)", "tanδ (—)", "Facteur de pertes tanδ")); plt.close()
-                    pdf.savefig(fig_loglog_simple(f, np.clip(df["ESR_Ohm"].values.astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)")); plt.close()
-                    pdf.savefig(fig_loglog_simple(f, np.abs(df["ESL_H"].values.astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)")); plt.close()
+                    pdf.savefig(fig_loglog_simple(f, np.abs(plot_df["Cp_F"].values), "Fréquence (Hz)", "|Cp| (F)", "Capacitance parallèle Cp")); plt.close()
+                    pdf.savefig(fig_semilogx_simple(f, plot_df["tanD"].values, "Fréquence (Hz)", "tanδ (—)", "Facteur de pertes tanδ")); plt.close()
+                    pdf.savefig(fig_loglog_simple(f, np.clip(plot_df["ESR_Ohm"].values.astype(float),1e-15,None), "Fréquence (Hz)", "ESR (Ω)", "Résistance série équivalente (ESR)")); plt.close()
+                    pdf.savefig(fig_loglog_simple(f, np.abs(plot_df["ESL_H"].values.astype(float)), "Fréquence (Hz)", "ESL (H)", "Inductance série équivalente (ESL)")); plt.close()
                 buf.seek(0)
                 return buf
 
-            pdf_buf = make_pdf(df, meta)
+            pdf_buf = make_pdf(raw_df, plot_df, meta)
             st.download_button("Télécharger rapport PDF", data=pdf_buf, file_name="rapport_s2p.pdf", mime="application/pdf")
 
     except Exception as e:
